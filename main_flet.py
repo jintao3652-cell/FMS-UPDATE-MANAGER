@@ -28,6 +28,8 @@ ft.context.disable_auto_update()
 APP_NAME = "FMS UPDATE MANAGER"
 ROAMING_DIR = Path(os.path.expandvars(r"%APPDATA%")) / APP_NAME
 LOCAL_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%")) / APP_NAME
+TASKBAR_ICON_FILE = Path(__file__).resolve().parent / "assets" / "travel_airplane.ico"
+APP_WINDOW_LOGO_FILE = Path(__file__).resolve().parent / "assets" / "logo_telegram.ico"
 STATE_FILE = ROAMING_DIR / "state.json"
 LOG_FILE = ROAMING_DIR / "app.log"
 EXTRACTED_DIR = LOCAL_DIR / "extracted"
@@ -45,6 +47,27 @@ OPENLIST_ROOT_PATH = "/"
 OPENLIST_USERNAME = "navdata"
 OPENLIST_PASSWORD = "navdata"
 OPENLIST_TOKEN_CACHE = ""
+OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
+    "fnx-aircraft-320": ("fenix",),
+    "pmdg-aircraft-736": ("pmdg", "wasm", "navdata"),
+    "pmdg-aircraft-737": ("pmdg", "wasm", "navdata"),
+    "pmdg-aircraft-738": ("pmdg", "wasm", "navdata"),
+    "pmdg-aircraft-739": ("pmdg", "wasm", "navdata"),
+    "pmdg-aircraft-77w": ("pmdg", "wasm", "navdata"),
+    "pmdg-aircraft-77f": ("pmdg", "wasm", "navdata"),
+    "pmdg-aircraft-77er": ("pmdg", "wasm", "navdata"),
+    "pmdg-aircraft-77l": ("pmdg", "wasm", "navdata"),
+    "tfdidesign-aircraft-md11": ("tfdi", "md11"),
+    "fslabs-aircraft-a321": ("fslabs",),
+    "justflight-aircraft-rj": ("justflight", "rj"),
+    "fss-aircraft-e19x": ("fss", "erj"),
+    "css-core": ("css",),
+    "fycyc-aircraft-c919x": ("c919",),
+    "ifly-aircraft-737max8": ("ifly", "max8"),
+    "inibuilds-aircraft-a340": ("inibuilds",),
+    "inibuilds-aircraft-a350": ("inibuilds",),
+    "aerosoft-aircraft-a346-pro": ("toliss", "dfdv2"),
+}
 COMMON_ARCHIVE_SUFFIXES = (
     ".zip",
     ".7z",
@@ -59,6 +82,8 @@ COMMON_ARCHIVE_SUFFIXES = (
     ".txz",
     ".exe",
 )
+BATCH_DOWNLOAD_WORKER_OPTIONS: tuple[int, ...] = (1, 2, 4, 8)
+DEFAULT_BATCH_DOWNLOAD_WORKERS = 4
 MSFS_VERSIONS = ["MSFS 2024", "MSFS 2020"]
 PLATFORMS = ["Xbox/MS Store", "Steam"]
 THEME_LIGHT = "Light Mode"
@@ -1344,6 +1369,66 @@ def openlist_list_dir_auto_request(folder_path: str = OPENLIST_ROOT_PATH) -> lis
         return openlist_list_dir_request(fresh_token, folder_path)
 
 
+def openlist_get_file_meta_request(token: str, file_path: str) -> dict:
+    path = str(file_path or "").strip()
+    if not path:
+        raise ValueError("OpenList 文件路径不能为空。")
+    if not path.startswith("/"):
+        path = "/" + path
+    payload = {"path": path, "password": ""}
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = Request(
+        OPENLIST_GET_URL,
+        data=body,
+        headers={
+            "Authorization": token,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "FMS-Update-Manager-Flet",
+            "Connection": "close",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+            status = int(getattr(resp, "status", 200) or 200)
+    except HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="ignore")
+        try:
+            data = json.loads(raw)
+            detail = str(data.get("message") or data.get("detail") or raw).strip()
+        except Exception:
+            detail = raw.strip() or str(exc)
+        raise ValueError(f"OpenList 文件信息读取失败 ({exc.code}): {detail}") from exc
+    except URLError as exc:
+        raise ValueError(f"无法连接 OpenList: {exc}") from exc
+
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        data = {"raw": raw}
+    if not isinstance(data, dict):
+        data = {"raw": raw}
+    if status >= 400 or int(data.get("code", 200) or 200) >= 400:
+        raise ValueError(str(data.get("message") or data.get("detail") or raw or "OpenList 文件信息读取失败"))
+    payload_data = data.get("data", {})
+    return payload_data if isinstance(payload_data, dict) else {}
+
+
+def openlist_get_file_meta_auto_request(file_path: str) -> dict:
+    global OPENLIST_TOKEN_CACHE
+    token = get_openlist_token(force_refresh=False)
+    try:
+        return openlist_get_file_meta_request(token, file_path)
+    except Exception as exc:
+        if not is_openlist_token_error(exc):
+            raise
+        OPENLIST_TOKEN_CACHE = ""
+        fresh_token = get_openlist_token(force_refresh=True)
+        return openlist_get_file_meta_request(fresh_token, file_path)
+
+
 def openlist_cycle_path(cycle_id: str) -> str:
     cycle_text = str(cycle_id or "").strip().strip("/")
     if not cycle_text:
@@ -1396,6 +1481,175 @@ def list_openlist_cycle_msfs_items(cycle_id: str) -> list[dict]:
     if not find_openlist_cycle_msfs_folder(cycle_text):
         raise ValueError(f"OpenList 未找到 MSFS 目录: {cycle_text}/MSFS")
     return openlist_list_dir_auto_request(openlist_cycle_msfs_path(cycle_text))
+
+
+def _norm_token(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(text or "").lower())
+
+
+def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[dict]) -> dict | None:
+    package = addon.package_name.strip().lower()
+    addon_name = addon.name.strip().lower()
+    cycle_norm = _norm_token(cycle_id)
+
+    file_items: list[tuple[dict, str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if bool(item.get("is_dir")):
+            continue
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+        file_items.append((item, name, _norm_token(name)))
+
+    def find_by_rules(rules: list[tuple[str, ...]]) -> dict | None:
+        for rule in rules:
+            candidates: list[tuple[dict, str, str]] = []
+            for tup in file_items:
+                if all(token in tup[2] for token in rule):
+                    candidates.append(tup)
+            if not candidates:
+                continue
+            if cycle_norm:
+                cycle_candidates = [c for c in candidates if cycle_norm in c[2]]
+                if cycle_candidates:
+                    candidates = cycle_candidates
+            candidates.sort(key=lambda c: c[1].lower())
+            return candidates[0][0]
+        return None
+
+    hard_rules: list[tuple[str, ...]] = []
+    if package.startswith("pmdg-aircraft-"):
+        # PMDG family uses a universal package naming: PMDG_WASM_NavData_XXXX
+        hard_rules = [("pmdg", "wasm", "navdata")]
+    elif package == "ifly-aircraft-737max8":
+        hard_rules = [("ifly", "b38m"), ("ifly", "wasm"), ("ifly", "navdata")]
+    elif package == "fnx-aircraft-320":
+        hard_rules = [("fenix", "navdata")]
+    elif package == "fslabs-aircraft-a321":
+        hard_rules = [("fslabs", "navdata")]
+    elif package == "fss-aircraft-e19x":
+        hard_rules = [("fss", "erj"), ("fss", "navdata")]
+    elif package == "css-core":
+        hard_rules = [("css",)]
+    elif package == "justflight-aircraft-rj":
+        hard_rules = [("justflight", "rj"), ("rj", "wasm")]
+    elif package == "tfdidesign-aircraft-md11":
+        hard_rules = [("tfdi", "md11")]
+    elif package in {"inibuilds-aircraft-a340", "inibuilds-aircraft-a350"}:
+        hard_rules = [("inibuilds",)]
+    elif package == "aerosoft-aircraft-a346-pro":
+        hard_rules = [("toliss", "dfdv2"), ("toliss",)]
+
+    hard_match = find_by_rules(hard_rules)
+    if hard_match is not None:
+        return hard_match
+
+    hints = list(OPENLIST_ARCHIVE_NAME_HINTS.get(package, ()))
+    if not hints:
+        hints = [p for p in addon_search_tokens(addon) if len(p) >= 3]
+    hints_norm = [_norm_token(h) for h in hints if _norm_token(h)]
+
+    best_item: dict | None = None
+    best_score = -1
+    tie = False
+    for item, name, name_norm in file_items:
+        score = 0
+        for hint in hints_norm:
+            if hint and hint in name_norm:
+                score += 10
+        if cycle_norm and cycle_norm in name_norm:
+            score += 6
+        if package.startswith("pmdg-aircraft-73") and "777" in name_norm:
+            score -= 30
+        if package.startswith("pmdg-aircraft-77") and "737" in name_norm:
+            score -= 30
+        if package == "inibuilds-aircraft-a340" and "a350" in name_norm:
+            score -= 30
+        if package == "inibuilds-aircraft-a350" and "a340" in name_norm:
+            score -= 30
+        if package == "aerosoft-aircraft-a346-pro" and "inibuilds" in name_norm:
+            score -= 40
+        if "a340" in addon_name and "a350" in name_norm:
+            score -= 15
+        if "a350" in addon_name and "a340" in name_norm:
+            score -= 15
+        if score <= 0:
+            continue
+        if score > best_score:
+            best_score = score
+            best_item = item
+            tie = False
+        elif score == best_score:
+            tie = True
+    if best_score <= 0 or best_item is None or tie:
+        return None
+    return best_item
+
+
+def download_openlist_archive_for_addon(
+    addon: Addon,
+    cycle_id: str,
+    download_dir: Path,
+    progress_callback: Callable[[str], None] | None = None,
+) -> dict:
+    cycle_text = str(cycle_id or "").strip()
+    if not cycle_text:
+        raise ValueError("未指定 AIRAC 期数。")
+    if progress_callback is not None:
+        progress_callback(f"正在读取 OpenList 目录: /{cycle_text}/MSFS")
+    items = list_openlist_cycle_msfs_items(cycle_text)
+    chosen = select_openlist_archive_for_addon(addon, cycle_text, items)
+    if chosen is None:
+        raise ValueError(f"未找到与机型匹配的 OpenList 压缩包: {addon.name} / {cycle_text}")
+    file_name = str(chosen.get("name", "")).strip()
+    if not file_name:
+        raise ValueError("OpenList 返回的压缩包名称为空。")
+    remote_path = f"{openlist_cycle_msfs_path(cycle_text).rstrip('/')}/{file_name}"
+    if progress_callback is not None:
+        progress_callback(f"正在获取下载链接: {file_name}")
+    meta = openlist_get_file_meta_auto_request(remote_path)
+    raw_url = str(meta.get("raw_url", "")).strip()
+    if not raw_url:
+        raise ValueError(f"OpenList 未返回可用下载链接: {file_name}")
+
+    download_dir.mkdir(parents=True, exist_ok=True)
+    local_file = download_dir / file_name
+    if local_file.exists() and local_file.is_file():
+        local_file.unlink(missing_ok=True)
+    if progress_callback is not None:
+        progress_callback(f"正在下载: {file_name}")
+    req = Request(
+        raw_url,
+        headers={
+            "Accept": "*/*",
+            "User-Agent": "FMS-Update-Manager-Flet",
+            "Connection": "close",
+        },
+        method="GET",
+    )
+    total_size = 0
+    with urlopen(req, timeout=60) as resp:
+        with local_file.open("wb") as fh:
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                total_size += len(chunk)
+    if total_size <= 0:
+        raise ValueError(f"下载失败或文件为空: {file_name}")
+    if progress_callback is not None:
+        progress_callback(f"下载完成: {file_name} ({total_size} bytes)")
+    return {
+        "archive_path": str(local_file),
+        "archive_name": file_name,
+        "cycle_id": cycle_text,
+        "bytes": total_size,
+        "remote_path": remote_path,
+        "raw_url": raw_url,
+    }
 
 
 def normalize_backup_power_login_url(raw_url: str) -> str:
@@ -1451,6 +1705,20 @@ def cleanup_backup_power_download_cache() -> None:
     shutil.rmtree(cache_dir, ignore_errors=True)
 
 
+def normalize_batch_download_workers(raw_value: Any) -> int:
+    try:
+        value = int(str(raw_value).strip())
+    except Exception:
+        return DEFAULT_BATCH_DOWNLOAD_WORKERS
+    if value in BATCH_DOWNLOAD_WORKER_OPTIONS:
+        return value
+    if value <= min(BATCH_DOWNLOAD_WORKER_OPTIONS):
+        return min(BATCH_DOWNLOAD_WORKER_OPTIONS)
+    if value >= max(BATCH_DOWNLOAD_WORKER_OPTIONS):
+        return max(BATCH_DOWNLOAD_WORKER_OPTIONS)
+    return DEFAULT_BATCH_DOWNLOAD_WORKERS
+
+
 def load_state() -> dict:
     if not STATE_FILE.exists():
         return {
@@ -1469,6 +1737,7 @@ def load_state() -> dict:
             "backup_power_last_login_at": "",
             "backup_power_download_dir": "",
             "addon_install_cycles": {},
+            "batch_download_workers": DEFAULT_BATCH_DOWNLOAD_WORKERS,
         }
     try:
         state = json.loads(STATE_FILE.read_text(encoding="utf-8", errors="ignore"))
@@ -1498,6 +1767,9 @@ def load_state() -> dict:
         state["backup_power_download_dir"] = normalize_backup_power_download_dir(state.get("backup_power_download_dir", ""))
         if not isinstance(state.get("addon_install_cycles"), dict):
             state["addon_install_cycles"] = {}
+        state["batch_download_workers"] = normalize_batch_download_workers(
+            state.get("batch_download_workers", DEFAULT_BATCH_DOWNLOAD_WORKERS)
+        )
         return state
     except Exception:
         return {
@@ -1516,6 +1788,7 @@ def load_state() -> dict:
             "backup_power_last_login_at": "",
             "backup_power_download_dir": "",
             "addon_install_cycles": {},
+            "batch_download_workers": DEFAULT_BATCH_DOWNLOAD_WORKERS,
         }
 
 
@@ -1597,6 +1870,50 @@ def default_addons() -> list[dict]:
             "platform": "Xbox/MS Store",
             "target_path": "",
             "package_name": "inibuilds-aircraft-a340",
+            "navdata_subpath": r"work\NavigationData",
+        }
+    )
+    addons.append(
+        {
+            "name": "iniBuilds A350",
+            "description": "iniBuilds A350 family",
+            "simulator": "MSFS 2024",
+            "platform": "Steam",
+            "target_path": "",
+            "package_name": "inibuilds-aircraft-a350",
+            "navdata_subpath": r"work\NavigationData",
+        }
+    )
+    addons.append(
+        {
+            "name": "iniBuilds A350",
+            "description": "iniBuilds A350 family",
+            "simulator": "MSFS 2020",
+            "platform": "Steam",
+            "target_path": "",
+            "package_name": "inibuilds-aircraft-a350",
+            "navdata_subpath": r"work\NavigationData",
+        }
+    )
+    addons.append(
+        {
+            "name": "iniBuilds A350",
+            "description": "iniBuilds A350 family",
+            "simulator": "MSFS 2020",
+            "platform": "Xbox/MS Store",
+            "target_path": "",
+            "package_name": "inibuilds-aircraft-a350",
+            "navdata_subpath": r"work\NavigationData",
+        }
+    )
+    addons.append(
+        {
+            "name": "iniBuilds A350",
+            "description": "iniBuilds A350 family",
+            "simulator": "MSFS 2024",
+            "platform": "Xbox/MS Store",
+            "target_path": "",
+            "package_name": "inibuilds-aircraft-a350",
             "navdata_subpath": r"work\NavigationData",
         }
     )
@@ -1706,10 +2023,10 @@ def default_wasm_scan_bases(simulator: str, platform: str) -> list[str]:
         return _normalize_path_list(
             [
                 root,
-                os.path.join(root, "WASM", "MSFS2020"),
                 os.path.join(root, "WASM", "MSFS2024"),
-                os.path.join(wasm_root, "MSFS2020"),
                 os.path.join(wasm_root, "MSFS2024"),
+                os.path.join(root, "WASM", "MSFS2020"),
+                os.path.join(wasm_root, "MSFS2020"),
             ]
         )
     if platform == "Steam":
@@ -1880,14 +2197,16 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
     if package.startswith("pmdg-aircraft-73") or "pmdg 737" in name:
         if "pmdg" not in hay:
             return False
-        if "737-600" in name:
-            return "737-600" in hay or "736" in hay
-        if "737-700" in name:
-            return "737-700" in hay
-        if "737-800" in name:
-            return "737-800" in hay or "738" in hay
-        if "737-900" in name:
-            return "737-900" in hay or "739" in hay
+        if "737-600" in name and ("737-600" in hay or "736" in hay):
+            return True
+        if "737-700" in name and "737-700" in hay:
+            return True
+        if "737-800" in name and ("737-800" in hay or "738" in hay):
+            return True
+        if "737-900" in name and ("737-900" in hay or "739" in hay):
+            return True
+        if addon.simulator == "MSFS 2024":
+            return "737" in hay or compact in {"pmdg", "pmdg737"}
         return False
 
     if package.startswith("pmdg-aircraft-77") or "pmdg 777" in name:
@@ -1899,7 +2218,11 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
             return "200er" in compact or "777200er" in compact or "77er" in compact
         if "777f" in name:
             return "777f" in compact or ("777" in hay and "freighter" in hay) or "77f" in compact
-        return "300er" in compact or "777300er" in compact or "77w" in compact
+        if "300er" in compact or "777300er" in compact or "77w" in compact:
+            return True
+        if addon.simulator == "MSFS 2024":
+            return "777" in hay or compact in {"pmdg", "pmdg777"}
+        return False
 
     if package == "fnx-aircraft-320" or name.startswith("fenix"):
         return "fenix" in hay
@@ -1917,11 +2240,13 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
         return "c919" in hay
     if package == "ifly-aircraft-737max8" or "ifly" in name:
         return "ifly" in hay and ("737-max8" in hay or "737max8" in compact or "max8" in compact)
-    if package == "inibuilds-aircraft-a340":
+    if package in {"inibuilds-aircraft-a340", "inibuilds-aircraft-a350"}:
         if "inibuilds" not in hay:
             return False
         if "dfd" in hay:
             return True
+        if package == "inibuilds-aircraft-a350" or "a350" in name:
+            return "a350" in hay or "350" in compact
         if "a340-300" in name or "a343" in name:
             return "a340-300" in hay or "a343" in compact
         if "a340-600" in name or "a346" in name:
@@ -1947,10 +2272,102 @@ def text_matches_addon_signature(addon: Addon, text: str) -> bool:
     return any(token in hay for token in tokens)
 
 
+def cycle_name_needs_path_disambiguation(addon: Addon, cycle_name: str) -> bool:
+    hay = cycle_name.strip().lower()
+    compact = re.sub(r"[^a-z0-9]+", "", hay)
+    package = addon.package_name.strip().lower()
+    name = addon.name.strip().lower()
+
+    if package.startswith("pmdg-aircraft-73") or "pmdg 737" in name:
+        if "pmdg" not in hay:
+            return False
+        specific_tokens = ("736", "737600", "737700", "738", "737800", "739", "737900")
+        return not any(token in compact for token in specific_tokens)
+
+    if package.startswith("pmdg-aircraft-77") or "pmdg 777" in name:
+        if "pmdg" not in hay:
+            return False
+        specific_tokens = (
+            "77l",
+            "777200lr",
+            "200lr",
+            "77er",
+            "777200er",
+            "200er",
+            "77f",
+            "777f",
+            "freighter",
+            "77w",
+            "777300er",
+            "300er",
+        )
+        return not any(token in compact for token in specific_tokens)
+    return False
+
+
 def path_matches_addon_signature(addon: Addon, candidate_dir: Path, cycle_json_path: Path | None = None) -> bool:
     haystack = str(candidate_dir).lower().replace("\\", "/")
     package = addon.package_name.strip().lower()
     name = addon.name.strip().lower()
+
+    # PMDG families must match their package folder signature to avoid
+    # accidental cross-match with other 737/777 addons (e.g. iFly MAX8).
+    if package.startswith("pmdg-aircraft-73") or "pmdg 737" in name:
+        if package and package not in haystack:
+            return False
+    if package.startswith("pmdg-aircraft-77") or "pmdg 777" in name:
+        if package and package not in haystack:
+            return False
+
+    # A340 families can share generic tokens like "a340" in path/cycle metadata.
+    # Enforce package-level separation to avoid Aerosoft A346 matching iniBuilds A340.
+    if package == "aerosoft-aircraft-a346-pro":
+        if "inibuilds-aircraft-a340" in haystack:
+            return False
+        if "aerosoft-aircraft-a346-pro" not in haystack:
+            return False
+    if package == "inibuilds-aircraft-a340":
+        if addon.simulator == "MSFS 2024":
+            if (
+                "microsoft flight simulator 2024" not in haystack
+                and "microsoft.limitless_8wekyb3d8bbwe" not in haystack
+                and "/msfs2024/" not in haystack
+            ):
+                return False
+        elif addon.simulator == "MSFS 2020":
+            if (
+                "microsoft flight simulator 2024" in haystack
+                or "microsoft.limitless_8wekyb3d8bbwe" in haystack
+                or "/msfs2024/" in haystack
+            ):
+                return False
+        if "aerosoft-aircraft-a346-pro" in haystack:
+            return False
+        if "inibuilds-aircraft-a350" in haystack:
+            return False
+        if "inibuilds-aircraft-a340" not in haystack:
+            return False
+    if package == "inibuilds-aircraft-a350":
+        if addon.simulator == "MSFS 2024":
+            if (
+                "microsoft flight simulator 2024" not in haystack
+                and "microsoft.limitless_8wekyb3d8bbwe" not in haystack
+                and "/msfs2024/" not in haystack
+            ):
+                return False
+        elif addon.simulator == "MSFS 2020":
+            if (
+                "microsoft flight simulator 2024" in haystack
+                or "microsoft.limitless_8wekyb3d8bbwe" in haystack
+                or "/msfs2024/" in haystack
+            ):
+                return False
+        if "aerosoft-aircraft-a346-pro" in haystack:
+            return False
+        if "inibuilds-aircraft-a340" in haystack:
+            return False
+        if "inibuilds-aircraft-a350" not in haystack:
+            return False
 
     # Hard guard for known conflicting families (RJ vs CRJ).
     if package == "justflight-aircraft-rj" or "rj professional" in name:
@@ -1966,6 +2383,8 @@ def path_matches_addon_signature(addon: Addon, candidate_dir: Path, cycle_json_p
         cycle_name = read_cycle_json_name(cycle_json_path)
         if cycle_name:
             if cycle_name_matches_addon(addon, cycle_name):
+                if cycle_name_needs_path_disambiguation(addon, cycle_name):
+                    return text_matches_addon_signature(addon, str(candidate_dir))
                 return True
             if addon_requires_cycle_name_match(addon):
                 return False
@@ -2034,7 +2453,11 @@ def addon_key(addon: Addon) -> str:
 
 
 def addon_prefers_community(addon: Addon) -> bool:
-    return addon.package_name.strip().lower() == "ifly-aircraft-737max8"
+    package = addon.package_name.strip().lower()
+    if package == "ifly-aircraft-737max8":
+        # MSFS 2024 iFly package is currently installed under WASM paths in user setups.
+        return addon.simulator != "MSFS 2024"
+    return False
 
 
 def fixed_relative_path(addon: Addon) -> str:
@@ -2387,6 +2810,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if expected_package and package != expected_package:
             item["package_name"] = expected_package
             migrated = True
+        if (
+            package == "ifly-aircraft-737max8"
+            and str(item.get("simulator", "")).strip() == "MSFS 2024"
+            and str(item.get("navdata_subpath", "")).strip().lower().replace("/", "\\") != r"work\navdata\permanent"
+        ):
+            item["navdata_subpath"] = r"work\navdata\Permanent"
+            migrated = True
         if (package == "justflight-aircraft-rj" or "rj professional" in name) and "aerosoft-crj" in target:
             item["target_path"] = ""
             migrated = True
@@ -2410,9 +2840,19 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         state["addons"] = addon_items
         save_state(state)
     addons_all = [a for a in (to_addon(item) for item in addon_items) if a is not None]
+    default_catalog_signatures: set[tuple[str, str, str, str]] = {
+        (
+            str(item.get("name", "")).strip(),
+            str(item.get("simulator", "")).strip(),
+            str(item.get("platform", "")).strip(),
+            str(item.get("package_name", "")).strip().lower(),
+        )
+        for item in default_addons()
+        if isinstance(item, dict)
+    }
     colors = get_colors(theme_name)
 
-    page.title = "FMS UPDATE MANAGER (Flet)"
+    page.title = "FMS UPDATE MANAGER  | 本软件正在测试中，有问题请联系 qq=168329908"
     page.theme_mode = ft.ThemeMode.DARK if theme_name == THEME_DARK else ft.ThemeMode.LIGHT
     page.bgcolor = colors["root_bg"]
     page.padding = 12
@@ -2426,10 +2866,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         setattr(page, "window_height", 700)
         setattr(page, "window_min_width", 1100)
         setattr(page, "window_min_height", 700)
+    try:
+        if TASKBAR_ICON_FILE.exists():
+            page.window.icon = str(TASKBAR_ICON_FILE)
+    except Exception:
+        pass
 
     airac_id_text = ft.Text("----", size=fs(34), weight=ft.FontWeight.BOLD, color=colors["cycle_big"])
     airac_effective_text = ft.Text("本期数据生效日期：--", size=fs(12), color=colors["text_sub"])
-    airac_next_text = ft.Text("本期数据还有--天结束支持", size=fs(12), color=colors["text_sub"])
+    airac_next_text = ft.Text("本期数据将于--月--日到期", size=fs(12), color=colors["text_sub"])
 
     left_list = ft.ListView(expand=True, spacing=6)
     right_cards_list = ft.Column(expand=True, spacing=10)
@@ -2444,6 +2889,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     install_overlay_lines: list[str] = []
     install_overlay_list = ft.ListView(expand=True, spacing=6, auto_scroll=True)
     install_overlay_scroll_pending = False
+    install_overlay_last_update_ts = 0.0
+    install_overlay_update_interval = 0.25
     install_overlay_title_text = "安装状态"
     install_overlay_title = ft.Text(install_overlay_title_text, size=fs(24), weight=ft.FontWeight.BOLD, color=colors["text_title"])
     install_overlay_container = ft.Container(visible=False)
@@ -2457,6 +2904,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     op_dialog_title = ft.Text("", size=fs(18), weight=ft.FontWeight.BOLD)
     op_dialog_status = ft.Text("", size=fs(13), selectable=True)
     op_dialog_detail = ft.Text("", size=fs(12), color=colors["text_sub"], selectable=True)
+    op_overlay_container = ft.Container(visible=False)
+    op_hide_button = ft.TextButton("返回")
+    backup_power_login_valid = False
+    one_click_install_filter_button: ft.Button | None = None
 
 
     active_sims = enabled_simulators(state)
@@ -2761,13 +3212,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             return
         try:
             if busy:
+                setattr(button, "_busy_active", True)
                 if not hasattr(button, "_busy_original_content"):
                     setattr(button, "_busy_original_content", button.content)
-                button.disabled = True
                 if busy_text is not None:
                     button.content = busy_text
             else:
-                button.disabled = False
+                setattr(button, "_busy_active", False)
                 if hasattr(button, "_busy_original_content"):
                     button.content = cast(Any, getattr(button, "_busy_original_content"))
             update_controls(button)
@@ -2776,6 +3227,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 log("Skipped busy-state update for frozen button control.")
                 return
             raise
+
+    def is_button_busy(button: ft.Button | None) -> bool:
+        if button is None:
+            return False
+        return bool(getattr(button, "_busy_active", False))
 
     def log(msg: str) -> None:
         line = f"[{human_time()}] {msg}"
@@ -2907,7 +3363,6 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def show_operation_dialog(title: str, status: str, detail: str = "") -> None:
         nonlocal op_dialog, op_dialog_suppressed
-        op_dialog_suppressed = False
         op_dialog_title.value = title
         op_dialog_status.value = status
         op_dialog_detail.value = detail or "请稍候，任务正在执行中。"
@@ -2916,98 +3371,63 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             nonlocal op_dialog_suppressed
             op_dialog_suppressed = True
             log("处理中弹窗: 点击返回")
-            close_operation_dialog(reset_suppressed=False)
+            op_overlay_container.visible = False
+            update_controls(op_overlay_container)
             snack("已返回主界面，任务仍在后台执行。")
 
-        if op_dialog is None:
-            op_dialog = ft.AlertDialog(
-                modal=False,
-                title=op_dialog_title,
-                content=ft.Column(
-                    tight=True,
-                    spacing=12,
-                    controls=[
-                        ft.Row(
-                            spacing=10,
-                            controls=[
-                                ft.ProgressRing(width=24, height=24, stroke_width=3),
-                                ft.Text("处理中", size=fs(14), weight=ft.FontWeight.W_600),
-                            ],
-                        ),
-                        op_dialog_status,
-                        op_dialog_detail,
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.END,
-                            controls=[ft.TextButton("返回", on_click=hide_click)],
-                        ),
-                    ],
-                ),
-            )
-        try:
-            if not getattr(op_dialog, "open", False):
-                if not try_page_open(op_dialog):
-                    raise AttributeError("page.open unavailable")
-            else:
-                if not try_control_update(op_dialog):
-                    page.update()
-        except Exception:
-            setattr(page, "dialog", op_dialog)
-            setattr(op_dialog, "open", True)
-            page.update()
+        if op_dialog_suppressed:
+            return
+        op_hide_button.on_click = hide_click
+        op_overlay_container.visible = True
+        update_controls(op_overlay_container)
 
     def update_operation_dialog(status: str, detail: str = "") -> None:
         if op_dialog_suppressed:
             return
-        if op_dialog is None:
+        if not op_overlay_container.visible:
             show_operation_dialog("处理中", status, detail)
-            return
-        if not getattr(op_dialog, "open", False):
             return
         op_dialog_status.value = status
         if detail:
             op_dialog_detail.value = detail
-        if not try_control_update(op_dialog):
-            page.update()
+        update_controls(op_overlay_container)
 
     def close_operation_dialog(reset_suppressed: bool = True) -> None:
         nonlocal op_dialog, op_dialog_suppressed
         if reset_suppressed:
             op_dialog_suppressed = False
-        if op_dialog is None:
-            return
-        dismiss_dialog(op_dialog)
+        op_overlay_container.visible = False
+        update_controls(op_overlay_container)
+
+    def reset_operation_dialog_suppression() -> None:
+        nonlocal op_dialog_suppressed
+        op_dialog_suppressed = False
 
     def show_info_dialog(title: str, message: str) -> None:
         def close_dialog(_e=None):
-            dismiss_dialog(dlg)
+            close_custom_modal()
 
-        dlg = ft.AlertDialog(
-            modal=True,
-            title=ft.Text(title),
-            content=ft.Column(
-                tight=True,
-                spacing=12,
-                controls=[
-                    ft.Text(message, selectable=True),
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.END,
-                        controls=[ft.TextButton("OK", on_click=close_dialog)],
-                    ),
-                ],
-            ),
-        )
         try:
-            try:
-                if not try_page_open(dlg):
-                    raise AttributeError("page.open unavailable")
-            except Exception:
-                setattr(page, "dialog", dlg)
-                setattr(dlg, "open", True)
-                page.update()
+            if install_overlay_container.visible:
+                close_install_overlay()
         except Exception:
-            setattr(page, "dialog", dlg)
-            setattr(dlg, "open", True)
-            page.update()
+            pass
+        try:
+            close_operation_dialog()
+        except Exception:
+            pass
+
+        open_custom_modal(
+            title,
+            [
+                ft.Text(message, selectable=True),
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.END,
+                    controls=[ft.Button("OK", bgcolor="#1a73e8", color="#ffffff", on_click=close_dialog)],
+                ),
+            ],
+            width=760,
+        )
 
     def show_confirm_dialog(title: str, message: str, on_yes, on_no=None) -> None:
         dlg: ft.AlertDialog | None = None
@@ -3066,6 +3486,106 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             if addon_key(addon) == key:
                 return addon
         return None
+
+    def is_default_catalog_addon(addon: Addon) -> bool:
+        signature = (
+            addon.name.strip(),
+            addon.simulator.strip(),
+            addon.platform.strip(),
+            addon.package_name.strip().lower(),
+        )
+        return signature in default_catalog_signatures
+
+    def persist_addon_target_path(addon: Addon, target_dir: Path) -> None:
+        addon.target_path = str(target_dir)
+        updated = False
+        package_name = addon.package_name.strip().lower()
+        for item in state.get("addons", []) if isinstance(state.get("addons"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            item_name = str(item.get("name", "")).strip()
+            item_sim = str(item.get("simulator", "")).strip()
+            item_platform = str(item.get("platform", "")).strip()
+            item_package = str(item.get("package_name", "")).strip().lower()
+            if (
+                item_name == addon.name.strip()
+                and item_sim == addon.simulator.strip()
+                and item_platform == addon.platform.strip()
+                and item_package == package_name
+            ):
+                item["target_path"] = str(target_dir)
+                updated = True
+                break
+        if updated:
+            save_state(state)
+
+    async def prompt_manual_addon_target_path(addon: Addon) -> Path | None:
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[Path | None] = loop.create_future()
+        picker_tag = "manual_addon_target_picker"
+
+        for ctrl in list(page.services):
+            if isinstance(ctrl, ft.FilePicker) and getattr(ctrl, "data", None) == picker_tag:
+                try:
+                    page.services.remove(ctrl)
+                except ValueError:
+                    pass
+        picker = ft.FilePicker()
+        picker.data = picker_tag
+        page.services.append(picker)
+
+        def finish_result(value: Path | None) -> None:
+            if not result_future.done():
+                result_future.set_result(value)
+            try:
+                page.services.remove(picker)
+            except ValueError:
+                pass
+
+        async def pick_dir_async() -> None:
+            try:
+                picked_path = await picker.get_directory_path(dialog_title=f"选择 {addon.name} 导航数据目录")
+            except Exception as exc:
+                snack(f"打开目录选择窗口失败: {exc}")
+                finish_result(None)
+                return
+            if not picked_path:
+                finish_result(None)
+                return
+            target_dir = Path(str(picked_path).strip())
+            if not target_dir.exists() or not target_dir.is_dir():
+                snack(f"目录不存在或不可用: {target_dir}")
+                finish_result(None)
+                return
+            persist_addon_target_path(addon, target_dir)
+            snack(f"已保存 {addon.name} 的安装目录: {target_dir}")
+            finish_result(target_dir)
+
+        def choose_now() -> None:
+            page.run_task(pick_dir_async)
+
+        def cancel_choose() -> None:
+            finish_result(None)
+
+        show_confirm_dialog(
+            "未检测到安装目录",
+            (
+                f"{addon.name} 未检测到可用导航数据目录。\n"
+                "请点击“继续”手动选择已安装机模的导航数据目录。"
+            ),
+            on_yes=choose_now,
+            on_no=cancel_choose,
+        )
+        return await result_future
+
+    def selected_install_cycle_for_addon(addon: Addon, fallback_cycle: str) -> str:
+        fallback = detect_airac(fallback_cycle)
+        install_cycles = state.get("addon_install_cycles", {})
+        if not isinstance(install_cycles, dict):
+            return fallback
+        chosen_raw = str(install_cycles.get(addon_key(addon), "")).strip()
+        chosen_cycle = detect_airac(chosen_raw)
+        return chosen_cycle if chosen_cycle not in {"", "UNKNOWN"} else fallback
 
     def perform_archive_update_install(
         addon: Addon,
@@ -3139,8 +3659,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         payload_dir: Path,
         archive_name: str,
         archive_airac: str,
-    ) -> None:
-        async def runner() -> None:
+        *,
+        show_result_dialog: bool = True,
+        run_in_background: bool = True,
+    ) -> asyncio.Task[bool] | None:
+        async def runner() -> bool:
             try:
                 open_install_overlay(title=f"安装状态 - {addon.name}", reset=False)
                 log(f"{addon.name}: begin install from archive '{archive_name}'")
@@ -3176,31 +3699,49 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     else f"导航数据更新成功，但 cycle.json 未提供 AIRAC，当前周期: {result['airac']}"
                 )
                 append_install_overlay_line(archive_cycle_msg)
-                snack(f"{addon.name} 更新完成: AIRAC {result['airac']}")
-                show_info_dialog(
-                    "更新完成",
-                    (
-                        f"{addon.name} 已更新到 AIRAC {result['airac']}。\n"
-                        f"安装文件数: {result['extracted_files']}\n"
-                        f"来源压缩包: {result['archive_name']}\n"
-                        f"{archive_cycle_msg}"
-                    ),
-                )
+                if show_result_dialog:
+                    snack(f"{addon.name} 更新完成: AIRAC {result['airac']}")
+                if show_result_dialog:
+                    show_info_dialog(
+                        "更新完成",
+                        (
+                            f"{addon.name} 已更新到 AIRAC {result['airac']}。\n"
+                            f"安装文件数: {result['extracted_files']}\n"
+                            f"来源压缩包: {result['archive_name']}\n"
+                            f"{archive_cycle_msg}"
+                        ),
+                    )
+                return True
             except Exception as exc:
                 append_install_overlay_line(f"安装失败: {exc}")
-                snack(f"{addon.name} 更新失败: {exc}")
-                show_info_dialog("更新失败", f"{addon.name} 更新失败。\n\n错误详情：{exc}")
+                if show_result_dialog:
+                    snack(f"{addon.name} 更新失败: {exc}")
+                if show_result_dialog:
+                    show_info_dialog("更新失败", f"{addon.name} 更新失败。\n\n错误详情：{exc}")
+                return False
             finally:
                 await asyncio.to_thread(cleanup_backup_power_download_cache)
                 await asyncio.to_thread(cleanup_temp_dir, extracted_root)
                 await rebuild_lists_async(show_loading=False)
 
-        page.run_task(runner)
+        if run_in_background:
+            page.run_task(runner)
+            return None
+        return asyncio.create_task(runner())
 
-    async def on_archive_update_pick_result(selected_files, addon: Addon, target: Path) -> None:
+    async def on_archive_update_pick_result(
+        selected_files,
+        addon: Addon,
+        target: Path,
+        *,
+        show_result_dialog: bool = True,
+        allow_force_prompt: bool = True,
+        wait_for_completion: bool = False,
+        reset_overlay: bool = True,
+    ) -> bool:
         if selected_files is None:
             log(f"{addon.name}: archive selection canceled")
-            return
+            return False
 
         files = selected_files
         if hasattr(selected_files, "files"):
@@ -3209,22 +3750,22 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             files = await files
         if not files:
             log(f"{addon.name}: archive selection canceled")
-            return
+            return False
 
         selected_file = files[0]
         file_path = getattr(selected_file, "path", None)
         if not file_path:
             snack("未获取到压缩包路径")
-            return
+            return False
         archive_path = Path(file_path)
         if not archive_path.exists():
             snack(f"压缩包不存在: {archive_path}")
-            return
+            return False
         if not is_supported_archive_file(archive_path):
             snack(f"不支持的压缩格式: {archive_path.name}")
-            return
+            return False
 
-        open_install_overlay(title=f"安装状态 - {addon.name}", reset=True)
+        open_install_overlay(title=f"安装状态 - {addon.name}", reset=reset_overlay)
         append_install_overlay_line(f"已选择压缩包: {archive_path.name}")
         log(f"{addon.name}: selected archive {archive_path.name}")
         if not target.exists():
@@ -3248,21 +3789,23 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         except Exception as exc:
             append_install_overlay_line(f"解压失败: {exc}")
             snack(f"解压失败: {exc}")
-            show_info_dialog(
-                "解压失败",
-                f"{addon.name} 压缩包解压失败。\n\n压缩包: {archive_path.name}\n错误详情：{exc}",
-            )
+            if show_result_dialog:
+                show_info_dialog(
+                    "解压失败",
+                    f"{addon.name} 压缩包解压失败。\n\n压缩包: {archive_path.name}\n错误详情：{exc}",
+                )
             await rebuild_lists_async(show_loading=False)
-            return
+            return False
         if not archive_payload:
             append_install_overlay_line("压缩包中未找到可用 cycle.json，无法安装")
             snack(f"压缩包中未找到可用 cycle.json: {archive_path.name}")
-            show_info_dialog(
-                "压缩包无效",
-                f"{archive_path.name} 中未找到可用 cycle.json，无法继续安装。",
-            )
+            if show_result_dialog:
+                show_info_dialog(
+                    "压缩包无效",
+                    f"{archive_path.name} 中未找到可用 cycle.json，无法继续安装。",
+                )
             await rebuild_lists_async(show_loading=False)
-            return
+            return False
         await rebuild_lists_async(show_loading=False)
 
         extracted_root = Path(str(archive_payload.get("extracted_root", "")))
@@ -3277,18 +3820,26 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             f"压缩包校验完成: 机型名称 '{cycle_name or '空'}'，AIRAC {archive_airac}"
         )
 
-        def continue_install() -> None:
+        async def continue_install_async() -> bool:
             log(f"{addon.name}: archive validation passed, installing...")
             append_install_overlay_line("压缩包校验通过，开始安装...")
             clear_force_install_prompt(refresh=False)
-            start_archive_update(
+            task = start_archive_update(
                 addon=addon,
                 target=target,
                 extracted_root=extracted_root,
                 payload_dir=payload_dir,
                 archive_name=archive_path.name,
                 archive_airac=archive_airac,
+                show_result_dialog=show_result_dialog,
+                run_in_background=not wait_for_completion,
             )
+            if wait_for_completion and task is not None:
+                return bool(await task)
+            return True
+
+        def continue_install() -> None:
+            page.run_task(continue_install_async)
 
         def cancel_install(reason: str) -> None:
             log(f"{addon.name}: update canceled by user ({reason})")
@@ -3297,6 +3848,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
         cycle_name_norm = cycle_name.strip().lower()
         if not cycle_name_norm:
+            if not allow_force_prompt:
+                log(f"{addon.name}: cycle.json name empty, skipped in batch mode")
+                append_install_overlay_line("cycle.json 的 name 为空，批量模式下已跳过")
+                return False
             log(f"{addon.name}: cycle.json name is empty, waiting for user confirmation")
             set_force_install_prompt(
                 "cycle.json 的 name 字段为空，无法校验机型匹配",
@@ -3304,8 +3859,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 on_cancel=lambda: cancel_install("cycle.json name 为空"),
             )
             snack("cycle.json 的 name 为空，请点击“强制安装”继续。")
-            return
+            return False
         if not cycle_name_matches_addon(addon, cycle_name):
+            if not allow_force_prompt:
+                log(f"{addon.name}: cycle name mismatch in batch mode (archive='{cycle_name}')")
+                append_install_overlay_line(f"机型名称不匹配，批量模式下已跳过: {cycle_name}")
+                return False
             log(
                 f"{addon.name}: cycle name mismatch detected (archive='{cycle_name}', addon='{addon.name}'), "
                 "waiting for user confirmation"
@@ -3316,32 +3875,125 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 on_cancel=lambda: cancel_install(f"机型名称不匹配: {cycle_name}"),
             )
             snack("检测到机型名称不匹配，请点击“强制安装”继续。")
-            return
-        continue_install()
+            return False
+        return await continue_install_async()
 
-    async def on_update_navdata_click(addon_key_value: str, trigger_button: ft.Button | None = None) -> None:
+    async def on_update_navdata_click(
+        addon_key_value: str,
+        trigger_button: ft.Button | None = None,
+        *,
+        bulk_mode: bool = False,
+        forced_cycle_id: str | None = None,
+        show_result_dialog: bool = True,
+        reset_overlay: bool = True,
+        wait_for_install: bool = False,
+    ) -> bool:
         try:
             addon = find_addon_by_key(addon_key_value)
             if addon is None:
                 snack("未找到对应机型。")
-                return
+                return False
+            if bulk_mode and not is_default_catalog_addon(addon):
+                append_install_overlay_line(f"{addon.name}: 跳过（手动添加机型需手动选包）")
+                return False
             target = resolve_target_dir(addon, state)
+            inferred_from_wasm = False
             if target is None:
                 target = resolve_wasm_target_by_folder_name(addon, state)
+                inferred_from_wasm = target is not None
+                if target is None and not bulk_mode and not is_default_catalog_addon(addon):
+                    target = await prompt_manual_addon_target_path(addon)
+                    if target is None:
+                        snack("未选择路径，已取消本次更新。")
+                        return False
+                    log(f"{addon.name}: using user-selected target {target}")
                 if target is None:
-                    snack("未检测到已安装数据。请先确认 WASM 下存在对应机型文件夹名称。")
-                    return
-                log(f"{addon.name}: no installed navdata found, using WASM inferred target {target}")
+                    message = "未检测到已安装数据。请先确认 WASM 下存在对应机型文件夹名称。"
+                    if bulk_mode:
+                        append_install_overlay_line(f"{addon.name}: {message}")
+                    else:
+                        snack(message)
+                    return False
+                if inferred_from_wasm:
+                    log(f"{addon.name}: no installed navdata found, using WASM inferred target {target}")
             log(f"{addon.name}: update requested, target={target}")
             if target.exists() and not target.is_dir():
-                snack(f"目标路径不是文件夹: {target}")
-                return
+                message = f"目标路径不是文件夹: {target}"
+                if bulk_mode:
+                    append_install_overlay_line(f"{addon.name}: {message}")
+                else:
+                    snack(message)
+                return False
             if not target.exists() and not target.parent.exists():
-                snack(f"目标父目录不存在: {target.parent}")
-                return
+                message = f"目标父目录不存在: {target.parent}"
+                if bulk_mode:
+                    append_install_overlay_line(f"{addon.name}: {message}")
+                else:
+                    snack(message)
+                return False
+            is_logged_in = bool(str(state.get("backup_power_token", "")).strip())
+            if is_logged_in and is_default_catalog_addon(addon):
+                cycle_id = detect_airac(str(forced_cycle_id or ""))
+                if cycle_id in {"", "UNKNOWN"} and current_cycle_info and current_cycle_info.get("cycle_id"):
+                    cycle_id = detect_airac(str(current_cycle_info.get("cycle_id", "")))
+                if cycle_id in {"", "UNKNOWN"}:
+                    cycle_info = await asyncio.to_thread(fetch_current_cycle)
+                    if cycle_info and cycle_info.get("cycle_id"):
+                        cycle_id = detect_airac(str(cycle_info.get("cycle_id", "")))
+                if cycle_id in {"", "UNKNOWN"}:
+                    message = "未获取到有效 AIRAC 期数，无法自动下载。"
+                    if bulk_mode:
+                        append_install_overlay_line(f"{addon.name}: {message}")
+                    else:
+                        snack(message)
+                    return False
+                download_dir = ensure_backup_power_download_dir(str(default_backup_power_download_dir()), create=True)
+                try:
+                    if bulk_mode:
+                        if not install_overlay_container.visible:
+                            open_install_overlay(title=f"安装状态 - {addon.name}", reset=reset_overlay)
+                    else:
+                        open_install_overlay(title=f"安装状态 - {addon.name}", reset=reset_overlay)
+                    append_install_overlay_line(f"自动模式: OpenList /{cycle_id}/MSFS")
+                    result = await run_blocking_with_feedback(
+                        download_openlist_archive_for_addon,
+                        addon,
+                        cycle_id,
+                        download_dir,
+                        message=f"正在从 OpenList 下载 {addon.name}",
+                        pulse_interval=0.25,
+                        progress_callback=append_install_overlay_line,
+                        provide_progress_callback=True,
+                        show_page_loading=False,
+                    )
+                    archive_path = Path(str(result.get("archive_path", "")).strip())
+                    if not archive_path.exists():
+                        raise ValueError(f"自动下载后未找到压缩包: {archive_path}")
+                    log(f"{addon.name}: OpenList auto archive selected {archive_path}")
+                    append_install_overlay_line(f"已自动下载压缩包: {archive_path.name}")
+                    picked = [type("PickedFile", (), {"path": str(archive_path)})()]
+                    return await on_archive_update_pick_result(
+                        picked,
+                        addon,
+                        target,
+                        show_result_dialog=show_result_dialog,
+                        allow_force_prompt=not bulk_mode,
+                        wait_for_completion=wait_for_install,
+                        reset_overlay=False,
+                    )
+                except Exception as exc:
+                    if bulk_mode:
+                        log(f"{addon.name}: OpenList auto download failed in batch mode ({exc})")
+                        append_install_overlay_line(f"{addon.name}: 自动下载失败: {exc}")
+                        return False
+                    log(f"{addon.name}: OpenList auto download failed, fallback to manual picker ({exc})")
+                    snack(f"自动下载失败，已切换手动选包: {exc}")
+            if bulk_mode:
+                append_install_overlay_line(f"{addon.name}: 跳过（当前模式不允许手动选包）")
+                return False
             if zip_update_picker is None:
                 snack("压缩包选择器未初始化")
-                return
+                return False
             try:
                 selected_files = await zip_update_picker.pick_files(
                     dialog_title=f"选择 {addon.name} 导航数据压缩包",
@@ -3349,17 +4001,28 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     file_type=ft.FilePickerFileType.CUSTOM,
                     allowed_extensions=["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz", "tbz2", "xz", "txz", "exe"],
                 )
-                await on_archive_update_pick_result(selected_files, addon, target)
+                return await on_archive_update_pick_result(
+                    selected_files,
+                    addon,
+                    target,
+                    show_result_dialog=show_result_dialog,
+                    allow_force_prompt=True,
+                    wait_for_completion=wait_for_install,
+                    reset_overlay=True,
+                )
             except Exception as exc:
                 snack(f"打开压缩包选择窗口失败: {exc}")
+                return False
         finally:
             set_button_busy(trigger_button, False)
 
     def make_update_click_handler(addon_key_value: str):
         def _handler(e) -> None:
             button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
-            if isinstance(button, ft.Button) and button.disabled:
+            if is_button_busy(button):
+                snack("任务正在处理中，请稍候。")
                 return
+            reset_operation_dialog_suppression()
             set_button_busy(button, True, "处理中...")
             page.run_task(on_update_navdata_click, addon_key_value, button)
 
@@ -3402,7 +4065,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         update_controls(log_overlay_container)
 
     def refresh_install_overlay() -> None:
-        lines = install_overlay_lines[-600:] if install_overlay_lines else ["暂无安装日志"]
+        lines = install_overlay_lines[-240:] if install_overlay_lines else ["暂无安装日志"]
         install_overlay_title.value = f"{install_overlay_title_text} ({len(lines)})"
         install_overlay_list.controls = [
             ft.Container(
@@ -3413,6 +4076,17 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             )
             for line in lines
         ]
+
+    def refresh_install_overlay_if_needed(force: bool = False) -> None:
+        nonlocal install_overlay_last_update_ts
+        now = time.monotonic()
+        if not force and now - install_overlay_last_update_ts < install_overlay_update_interval:
+            return
+        install_overlay_last_update_ts = now
+        refresh_install_overlay()
+        if install_overlay_container.visible:
+            page.update()
+            schedule_install_overlay_scroll_to_bottom()
 
     def schedule_install_overlay_scroll_to_bottom() -> None:
         nonlocal install_overlay_scroll_pending
@@ -3442,10 +4116,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if len(install_overlay_lines) > 1200:
             install_overlay_lines[:] = install_overlay_lines[-1200:]
         if refresh:
-            refresh_install_overlay()
-            if install_overlay_container.visible:
-                page.update()
-                schedule_install_overlay_scroll_to_bottom()
+            refresh_install_overlay_if_needed(force=False)
 
     def clear_force_install_prompt(*, refresh: bool = True) -> None:
         nonlocal pending_force_install_action, pending_force_install_cancel
@@ -3511,7 +4182,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             install_overlay_lines.clear()
             clear_force_install_prompt(refresh=False)
         install_overlay_title_text = title
-        refresh_install_overlay()
+        refresh_install_overlay_if_needed(force=True)
         install_overlay_container.visible = True
         page.update()
         schedule_install_overlay_scroll_to_bottom()
@@ -3524,7 +4195,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def clear_install_overlay(_e=None) -> None:
         install_overlay_lines.clear()
-        refresh_install_overlay()
+        refresh_install_overlay_if_needed(force=True)
         page.update()
 
     def on_scroll_top_click(_e) -> None:
@@ -3604,18 +4275,19 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 days_left = max(0, (info["end"] - datetime.now(timezone.utc)).days)
                 airac_id_text.value = cycle_id
                 airac_effective_text.value = f"本期数据生效日期：{start_text}"
-                airac_next_text.value = f"本期数据还有{days_left}天结束支持"
+                end_text_mmdd = info["end"].astimezone().strftime("%m月%d日")
+                airac_next_text.value = f"本期数据将于{end_text_mmdd}到期（还有{days_left}天）"
                 log(f"AIRAC current cycle fetched: {cycle_id} (effective {start_text}, end {end_text})")
             else:
                 airac_id_text.value = "--"
                 airac_effective_text.value = "本期数据生效日期：--"
-                airac_next_text.value = "本期数据还有--天结束支持"
+                airac_next_text.value = "本期数据将于--月--日到期"
             update_controls(airac_id_text, airac_effective_text, airac_next_text)
         except Exception as exc:
             current_cycle_info = None
             airac_id_text.value = "--"
             airac_effective_text.value = "本期数据生效日期：--"
-            airac_next_text.value = "本期数据还有--天结束支持"
+            airac_next_text.value = "本期数据将于--月--日到期"
             update_controls(airac_id_text, airac_effective_text, airac_next_text)
             snack(f"刷新周期失败: {exc}")
 
@@ -3854,18 +4526,19 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 days_left = max(0, (info["end"] - datetime.now(timezone.utc)).days)
                 airac_id_text.value = cycle_id
                 airac_effective_text.value = f"本期数据生效日期：{start_text}"
-                airac_next_text.value = f"本期数据还有{days_left}天结束支持"
+                end_text_mmdd = info["end"].astimezone().strftime("%m月%d日")
+                airac_next_text.value = f"本期数据将于{end_text_mmdd}到期（还有{days_left}天）"
                 log(f"AIRAC current cycle fetched: {cycle_id} (effective {start_text}, end {end_text})")
             else:
                 airac_id_text.value = "--"
                 airac_effective_text.value = "本期数据生效日期：--"
-                airac_next_text.value = "本期数据还有--天结束支持"
+                airac_next_text.value = "本期数据将于--月--日到期"
             update_controls(airac_id_text, airac_effective_text, airac_next_text)
         except Exception as exc:
             current_cycle_info = None
             airac_id_text.value = "--"
             airac_effective_text.value = "本期数据生效日期：--"
-            airac_next_text.value = "本期数据还有--天结束支持"
+            airac_next_text.value = "本期数据将于--月--日到期"
             update_controls(airac_id_text, airac_effective_text, airac_next_text)
             if notify_fail:
                 snack(f"刷新周期失败: {exc}")
@@ -3920,11 +4593,21 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     except Empty:
                         break
                 return
+            batch_lines: list[str] = []
             while True:
                 try:
                     line = progress_queue.get_nowait()
                 except Empty:
                     break
+                batch_lines.append(line)
+            if not batch_lines:
+                return
+            if progress_callback is append_install_overlay_line:
+                for line in batch_lines:
+                    append_install_overlay_line(line, refresh=False)
+                refresh_install_overlay_if_needed(force=True)
+                return
+            for line in batch_lines:
                 progress_callback(line)
 
         if provide_progress_callback:
@@ -3953,7 +4636,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         finally:
             flush_progress_queue()
             if show_operation_dialog_ui:
-                close_operation_dialog()
+                close_operation_dialog(reset_suppressed=False)
 
     async def rebuild_lists_async(scroll_to_key: str | None = None, show_loading: bool = False) -> None:
         nonlocal rebuild_generation
@@ -3998,15 +4681,17 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def on_refresh_click(e):
         button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
-        if isinstance(button, ft.Button) and button.disabled:
+        if is_button_busy(button):
+            snack("刷新任务正在进行中，请稍候。")
             return
+        reset_operation_dialog_suppression()
         set_button_busy(button, True, "刷新中...")
 
         async def runner() -> None:
             try:
                 airac_id_text.value = "..."
                 airac_effective_text.value = "本期数据生效日期：刷新中..."
-                airac_next_text.value = "本期数据还有--天结束支持"
+                airac_next_text.value = "本期数据将于--月--日到期"
                 update_controls(airac_id_text, airac_effective_text, airac_next_text, button)
                 await refresh_cycle_async()
                 await rebuild_lists_async(show_loading=False)
@@ -4017,8 +4702,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def on_rescan_click(e):
         button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
-        if isinstance(button, ft.Button) and button.disabled:
+        if is_button_busy(button):
+            snack("扫描任务正在进行中，请稍候。")
             return
+        reset_operation_dialog_suppression()
         set_button_busy(button, True, "扫描中...")
 
         async def runner() -> None:
@@ -4053,6 +4740,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 value=str(state.get("community_2024_paths", {}).get(key24_extra, "")).strip(),
                 hint_text=r"例如 ...\Packages\Community2024",
                 expand=True,
+            )
+            current_workers = normalize_batch_download_workers(
+                state.get("batch_download_workers", DEFAULT_BATCH_DOWNLOAD_WORKERS)
+            )
+            workers_dd = ft.Dropdown(
+                label="一键安装下载线程数",
+                value=str(current_workers),
+                options=[ft.dropdown.Option(str(v)) for v in BATCH_DOWNLOAD_WORKER_OPTIONS],
+                width=220,
             )
             err = ft.Text("", size=fs(12), color="#b83d4b")
             dlg: ft.Control | None = None
@@ -4139,6 +4835,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 p20 = fs20_field.value.strip()
                 p24 = fs24_field.value.strip()
                 p24_extra = fs24_extra_field.value.strip()
+                workers = normalize_batch_download_workers(workers_dd.value)
                 has20_selected = bool(has20_check.value)
                 has24_selected = bool(has24_check.value)
                 if not has20_selected and not has24_selected:
@@ -4162,6 +4859,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 state.setdefault("community_2024_paths", {})[key24_extra] = p24_extra
                 state.setdefault("enabled_simulators", {})["MSFS 2020"] = has20_selected
                 state.setdefault("enabled_simulators", {})["MSFS 2024"] = has24_selected
+                state["batch_download_workers"] = workers
                 nonlocal simulator
                 enabled_now = enabled_simulators(state)
                 if simulator not in enabled_now:
@@ -4184,7 +4882,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     ft.Row(spacing=8, controls=[fs20_field, browse20_btn]),
                     ft.Row(spacing=8, controls=[fs24_field, browse24_btn]),
                     ft.Row(spacing=8, controls=[fs24_extra_field, browse24_extra_btn]),
+                    ft.Row(spacing=8, controls=[workers_dd]),
                     ft.Text("目录必须存在；FS20/FS24 目录名需为 Community，FS24 Community2024 路径目录名需为 Community2024 或 Community。", size=fs(12), color=colors["text_meta"]),
+                    ft.Text("一键安装会并发下载，线程越大下载越快，但网络与服务器压力更高。", size=fs(12), color=colors["text_meta"]),
                     err,
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
@@ -4402,6 +5102,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def clear_saved_backup_power_token() -> None:
                 state["backup_power_token"] = ""
                 save_state(state)
+                set_backup_power_login_valid(False)
 
             async def try_reuse_saved_token(show_busy: bool, close_on_success: bool) -> bool:
                 nonlocal login_inflight
@@ -4409,6 +5110,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 saved_user = str(state.get("backup_power_username", "")).strip()
                 current_user = user_field.value.strip()
                 if not saved_token:
+                    set_backup_power_login_valid(False)
                     return False
                 if current_user and saved_user and current_user != saved_user:
                     return False
@@ -4436,6 +5138,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         f"登录时间: {state.get('backup_power_last_login_at', '--') or '--'}"
                     )
                     snack("已检测到有效 DATA Token，无需重新登录")
+                    set_backup_power_login_valid(True)
                     if not try_control_update(dlg):
                         page.update()
                     if close_on_success:
@@ -4451,6 +5154,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     else:
                         result_text.value = ""
                         err_text.value = f"校验 DATA Token 失败: {exc}"
+                    set_backup_power_login_valid(False)
                     if not try_control_update(dlg):
                         page.update()
                     return False
@@ -4518,6 +5222,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         state["backup_power_token"] = str(result.get("token", "")).strip()
                         state["backup_power_last_login_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         save_state(state)
+                        set_backup_power_login_valid(True)
                         token_len = len(state["backup_power_token"])
                         result_text.value = (
                             f"登录成功\n"
@@ -4533,6 +5238,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     except Exception as exc:
                         result_text.value = ""
                         err_text.value = f"登录失败: {exc}"
+                        set_backup_power_login_valid(False)
                         if not try_control_update(dlg):
                             page.update()
                     finally:
@@ -4703,6 +5409,189 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         except Exception as exc:
             snack(f"打开安装状态失败: {exc}")
 
+    def set_backup_power_login_valid(valid: bool) -> None:
+        nonlocal backup_power_login_valid
+        backup_power_login_valid = bool(valid)
+        if one_click_install_filter_button is None:
+            return
+        one_click_install_filter_button.visible = backup_power_login_valid
+        one_click_install_filter_button.disabled = not backup_power_login_valid
+        update_controls(one_click_install_filter_button)
+
+    async def refresh_backup_power_login_validity(notify_invalid: bool = False) -> bool:
+        token = str(state.get("backup_power_token", "")).strip()
+        if not token:
+            set_backup_power_login_valid(False)
+            return False
+        try:
+            await asyncio.to_thread(backup_power_me_request, token)
+            set_backup_power_login_valid(True)
+            return True
+        except Exception as exc:
+            log(f"DATA token 校验失败: {exc}")
+            set_backup_power_login_valid(False)
+            if notify_invalid:
+                snack("登录状态已失效，请重新登录后备隐藏能源。")
+            return False
+
+    def on_one_click_install_click(e):
+        button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
+        if is_button_busy(button):
+            open_install_overlay(title=install_overlay_title_text or "安装状态", reset=False)
+            snack("一键安装仍在后台执行，已打开安装状态。")
+            return
+        reset_operation_dialog_suppression()
+        set_button_busy(button, True, "执行中...")
+
+        async def runner() -> None:
+            try:
+                login_ok = await refresh_backup_power_login_validity(notify_invalid=True)
+                if not login_ok:
+                    snack("请先完成有效登录后，再执行一键安装。")
+                    return
+                scoped_addons = [a for a in addons_all if a.simulator == simulator and a.platform == platform]
+                if not scoped_addons:
+                    snack("当前模拟器/平台没有可更新的机型。")
+                    return
+
+                fallback_cycle = ""
+                if current_cycle_info and current_cycle_info.get("cycle_id"):
+                    fallback_cycle = detect_airac(str(current_cycle_info.get("cycle_id", "")))
+                if fallback_cycle in {"", "UNKNOWN"}:
+                    cycle_info = await asyncio.to_thread(fetch_current_cycle)
+                    if cycle_info and cycle_info.get("cycle_id"):
+                        fallback_cycle = detect_airac(str(cycle_info.get("cycle_id", "")))
+                if fallback_cycle in {"", "UNKNOWN"}:
+                    snack("未获取到有效 AIRAC 期数，无法执行一键安装。")
+                    return
+
+                open_install_overlay(title=f"安装状态 - 一键安装 {simulator} / {platform}", reset=True)
+                append_install_overlay_line(f"一键安装开始: {simulator} / {platform}")
+                append_install_overlay_line(f"默认期数: {fallback_cycle}")
+
+                total = len(scoped_addons)
+                success_count = 0
+                failed_count = 0
+                skipped_count = 0
+
+                install_jobs: list[tuple[Addon, Path, str, int]] = []
+                for idx, addon in enumerate(scoped_addons, start=1):
+                    if not is_default_catalog_addon(addon):
+                        skipped_count += 1
+                        append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 跳过（手动添加机型需手动选包）")
+                        continue
+                    target = resolve_target_dir(addon, state)
+                    if target is None:
+                        target = resolve_wasm_target_by_folder_name(addon, state)
+                    if target is None:
+                        failed_count += 1
+                        append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 失败（未检测到已安装目录）")
+                        continue
+                    if target.exists() and not target.is_dir():
+                        failed_count += 1
+                        append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 失败（目标路径不是目录）")
+                        continue
+                    if (not target.exists()) and (not target.parent.exists()):
+                        failed_count += 1
+                        append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 失败（目标父目录不存在）")
+                        continue
+                    addon_cycle = selected_install_cycle_for_addon(addon, fallback_cycle)
+                    install_jobs.append((addon, target, addon_cycle, idx))
+
+                if not install_jobs:
+                    summary = (
+                        f"一键安装结束: 总计{total}，成功0，失败{failed_count}，跳过{skipped_count}"
+                    )
+                    append_install_overlay_line(summary)
+                    snack(summary)
+                    return
+
+                append_install_overlay_line(f"待下载队列: {len(install_jobs)} 个机型")
+                for queue_idx, (addon, _target, addon_cycle, _source_idx) in enumerate(install_jobs, start=1):
+                    append_install_overlay_line(f"[排队 {queue_idx}/{len(install_jobs)}] {addon.name}（期数 {addon_cycle}）")
+
+                max_download_workers = normalize_batch_download_workers(
+                    state.get("batch_download_workers", DEFAULT_BATCH_DOWNLOAD_WORKERS)
+                )
+                append_install_overlay_line(f"进入并发下载阶段（线程数: {max_download_workers}）")
+                batch_download_root = BACKUP_DIR / "_openlist_batch_cache"
+                await asyncio.to_thread(batch_download_root.mkdir, parents=True, exist_ok=True)
+
+                sem = asyncio.Semaphore(max_download_workers)
+
+                async def download_job(
+                    addon: Addon,
+                    target: Path,
+                    cycle_id: str,
+                    idx: int,
+                ) -> tuple[Addon, Path, Path | None, str | None]:
+                    safe_key = re.sub(r"[^a-zA-Z0-9._-]+", "_", addon_key(addon))
+                    addon_download_dir = batch_download_root / safe_key
+                    await asyncio.to_thread(addon_download_dir.mkdir, parents=True, exist_ok=True)
+                    async with sem:
+                        append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 开始下载（期数 {cycle_id}）")
+                        try:
+                            result = await asyncio.to_thread(
+                                download_openlist_archive_for_addon,
+                                addon,
+                                cycle_id,
+                                addon_download_dir,
+                                None,
+                            )
+                            archive_path = Path(str(result.get("archive_path", "")).strip())
+                            if not archive_path.exists():
+                                raise ValueError(f"下载结果文件不存在: {archive_path}")
+                            append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 下载完成 -> {archive_path.name}")
+                            return addon, target, archive_path, None
+                        except Exception as exc:
+                            err = str(exc)
+                            append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 下载失败 -> {err}")
+                            return addon, target, None, err
+
+                download_results = await asyncio.gather(
+                    *[
+                        download_job(addon, target, cycle_id, idx)
+                        for addon, target, cycle_id, idx in install_jobs
+                    ]
+                )
+
+                append_install_overlay_line("进入安装阶段（按顺序执行）")
+                for addon, target, archive_path, download_error in download_results:
+                    if download_error or archive_path is None:
+                        failed_count += 1
+                        continue
+                    picked = [type("PickedFile", (), {"path": str(archive_path)})()]
+                    ok = await on_archive_update_pick_result(
+                        picked,
+                        addon,
+                        target,
+                        show_result_dialog=False,
+                        allow_force_prompt=False,
+                        wait_for_completion=True,
+                        reset_overlay=False,
+                    )
+                    if ok:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+
+                summary = (
+                    f"一键安装完成: 总计{total}，成功{success_count}，失败{failed_count}，跳过{skipped_count}"
+                )
+                append_install_overlay_line(summary)
+                snack(summary)
+            except Exception as exc:
+                append_install_overlay_line(f"一键安装异常: {exc}")
+                snack(f"一键安装失败: {exc}")
+            finally:
+                try:
+                    await asyncio.to_thread(shutil.rmtree, BACKUP_DIR / "_openlist_batch_cache", True)
+                except Exception:
+                    pass
+                set_button_busy(button, False)
+
+        page.run_task(runner)
+
     def on_open_log_folder_click(_e):
         try:
             ROAMING_DIR.mkdir(parents=True, exist_ok=True)
@@ -4733,6 +5622,19 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             btn.color = colors["filter_active_fg"] if selected else colors["switch_unsel_fg"]
 
     streamer_button = build_top_action_button("主播模式", on_click=on_streamer_mode_click)
+    one_click_install_filter_button = ft.Button(
+        "一键安装",
+        on_click=on_one_click_install_click,
+        visible=False,
+        height=30,
+        bgcolor=colors["panel_soft_bg"],
+        color=colors["text_meta"],
+        style=ft.ButtonStyle(
+            padding=ft.Padding.symmetric(horizontal=12, vertical=0),
+            shape=ft.RoundedRectangleBorder(radius=14),
+            text_style=ft.TextStyle(weight=ft.FontWeight.W_600),
+        ),
+    )
 
     def refresh_streamer_button() -> None:
         setattr(streamer_button, "text", "关闭主播模式" if streamer_mode else "主播模式")
@@ -4869,11 +5771,23 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
-                        ft.Column(
-                            spacing=1,
+                        ft.Row(
+                            spacing=10,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             controls=[
-                                ft.Text("AIRAC 周期管理器", size=fs(26), weight=ft.FontWeight.BOLD, color=colors["text_title"]),
-                                ft.Text("为你的 MSFS 插件机型更新导航数据库", size=fs(12), color=colors["text_sub"]),
+                                ft.Image(
+                                    src=str(APP_WINDOW_LOGO_FILE),
+                                    width=34,
+                                    height=34,
+                                    fit="contain",
+                                ) if APP_WINDOW_LOGO_FILE.exists() else ft.Container(width=0, height=0),
+                                ft.Column(
+                                    spacing=1,
+                                    controls=[
+                                        ft.Text("AIRAC 周期管理器", size=fs(26), weight=ft.FontWeight.BOLD, color=colors["text_title"]),
+                                        ft.Text("为你的 MSFS 插件机型更新导航数据库", size=fs(12), color=colors["text_sub"]),
+                                    ],
+                                ),
                             ],
                         ),
                         ft.Row(
@@ -4951,7 +5865,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
                     on_change=on_search_change,
                 ),
-                ft.Row(spacing=6, wrap=True, controls=list(filter_chips.values())),
+                ft.Row(spacing=6, wrap=True, controls=[*list(filter_chips.values()), one_click_install_filter_button]),
                 ft.Container(
                     expand=False,
                     border_radius=16,
@@ -5069,6 +5983,39 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         content=custom_modal_panel,
     )
 
+    op_overlay_container.content = ft.Container(
+        expand=True,
+        bgcolor="#0c122088",
+        alignment=ft.Alignment(0, 0),
+        content=ft.Container(
+            width=420,
+            border_radius=20,
+            bgcolor=colors["panel_bg"],
+            border=ft.Border.all(1, "#2f3c52"),
+            padding=16,
+            content=ft.Column(
+                tight=True,
+                spacing=12,
+                controls=[
+                    op_dialog_title,
+                    ft.Row(
+                        spacing=10,
+                        controls=[
+                            ft.ProgressRing(width=24, height=24, stroke_width=3),
+                            ft.Text("处理中", size=fs(14), weight=ft.FontWeight.W_600),
+                        ],
+                    ),
+                    op_dialog_status,
+                    op_dialog_detail,
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.END,
+                        controls=[op_hide_button],
+                    ),
+                ],
+            ),
+        ),
+    )
+
     install_force_button = ft.Button(
         "强制安装",
         icon=ft.Icons.WARNING_AMBER_ROUNDED,
@@ -5163,6 +6110,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 custom_modal_container,
                 log_overlay_container,
                 install_overlay_container,
+                op_overlay_container,
             ],
         )
     )
@@ -5170,23 +6118,24 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     refresh_streamer_button()
     refresh_segment_visuals()
     on_filter_change("All", rebuild=False)
+    set_backup_power_login_valid(False)
     if not fast_reload:
-        log("FMS UPDATE MANAGER (Flet) started.")
+        log("FMS UPDATE MANAGER  started.")
         airac_id_text.value = "..."
         airac_effective_text.value = "本期数据生效日期：加载中..."
-        airac_next_text.value = "本期数据还有--天结束支持"
+        airac_next_text.value = "本期数据将于--月--日到期"
         show_loading_state("正在初始化...")
 
         async def bootstrap() -> None:
+            await refresh_backup_power_login_validity(notify_invalid=False)
             await refresh_cycle_async(notify_fail=False)
             await rescan_and_rebuild_async(show_loading=False, notify_done=False)
 
         page.run_task(bootstrap)
     else:
         trigger_rebuild(show_loading=True)
+        page.run_task(refresh_backup_power_login_validity, False)
 
 
 if __name__ == "__main__":
     ft.run(main)
-
-
