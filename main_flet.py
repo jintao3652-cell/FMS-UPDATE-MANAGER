@@ -12,6 +12,7 @@ import struct
 import time
 import zipfile
 import tempfile
+import tarfile
 from queue import Empty, SimpleQueue
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -31,7 +32,8 @@ LOCAL_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%")) / APP_NAME
 TASKBAR_ICON_FILE = Path(__file__).resolve().parent / "assets" / "travel_airplane.ico"
 APP_WINDOW_LOGO_FILE = Path(__file__).resolve().parent / "assets" / "logo_telegram.ico"
 STATE_FILE = ROAMING_DIR / "state.json"
-LOG_FILE = ROAMING_DIR / "app.log"
+LEGACY_LOG_FILE = ROAMING_DIR / "app.log"
+LOG_DIR = ROAMING_DIR / "logs"
 EXTRACTED_DIR = LOCAL_DIR / "extracted"
 BACKUP_DIR = LOCAL_DIR / "backups"
 CYCLES_API_URL = "https://fmsdata.api.navigraph.com/v3/cycles"
@@ -84,6 +86,8 @@ COMMON_ARCHIVE_SUFFIXES = (
 )
 BATCH_DOWNLOAD_WORKER_OPTIONS: tuple[int, ...] = (1, 2, 4, 8)
 DEFAULT_BATCH_DOWNLOAD_WORKERS = 4
+CACHE_CLEANUP_DAY_OPTIONS: tuple[int, ...] = (1, 3, 7, 14, 30)
+DEFAULT_CACHE_CLEANUP_DAYS = 7
 MSFS_VERSIONS = ["MSFS 2024", "MSFS 2020"]
 PLATFORMS = ["Xbox/MS Store", "Steam"]
 THEME_LIGHT = "Light Mode"
@@ -823,6 +827,210 @@ def _extract_with_unrar_command(
         progress_callback(f"UnRAR 解压完成: {archive_path.name}")
 
 
+def _write_archive_member_to_temp(temp_dir: Path, member_name: str, src_stream: Any) -> bool:
+    normalized_name = normalize_zip_member(member_name)
+    if not normalized_name:
+        return False
+    relative_path = Path(normalized_name)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        return False
+    dst = temp_dir / relative_path
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with dst.open("wb") as out:
+        shutil.copyfileobj(src_stream, out)
+    return True
+
+
+def _extract_cycle_json_only_with_7z_command(
+    archive_path: Path,
+    temp_dir: Path,
+    *,
+    require_rar_support: bool = False,
+    progress_callback: Callable[[str], None] | None = None,
+) -> None:
+    exe = _find_rar_capable_7z_executable() if require_rar_support else _find_7z_executable()
+    if not exe:
+        if require_rar_support:
+            raise ValueError("RAR requires 7z.exe/7zz.exe or UnRAR.exe; 7za.exe is not enough.")
+        raise ValueError("7z/7za not found. Install py7zr or 7-Zip, or convert archive to ZIP/TAR.")
+    if require_rar_support and Path(exe).name.strip().lower() == "7za.exe":
+        raise ValueError("7za.exe does not support RAR extraction.")
+    if progress_callback is not None:
+        progress_callback(f"7z 开始提取 cycle.json: {archive_path.name}")
+    result = _run_7z_with_live_output(
+        [
+            exe,
+            "x",
+            "-y",
+            "-bsp1",
+            "-bso1",
+            "-bse1",
+            f"-o{temp_dir}",
+            str(archive_path),
+            "-r",
+            "-ir!cycle.json",
+        ],
+        on_output=progress_callback,
+    )
+    if result.returncode != 0:
+        tail = "\n".join([line for line in result.stdout.splitlines() if line.strip()][-8:])
+        detail = f"\n{tail}" if tail else ""
+        raise RuntimeError(f"7z cycle.json extract failed ({result.returncode}).{detail}")
+    if progress_callback is not None:
+        progress_callback(f"7z cycle.json 提取完成: {archive_path.name}")
+
+
+def _extract_cycle_jsons_to_temp_by_kind(
+    archive_path: Path,
+    temp_dir: Path,
+    *,
+    kind: str,
+    progress_callback: Callable[[str], None] | None = None,
+) -> None:
+    if kind == "zip":
+        if progress_callback is not None:
+            progress_callback(f"ZIP 提取 cycle.json: {archive_path.name}")
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                member = normalize_zip_member(info.filename)
+                if Path(member).name.lower() != "cycle.json":
+                    continue
+                with zf.open(info, "r") as src:
+                    _write_archive_member_to_temp(temp_dir, member, src)
+        return
+
+    if kind == "tar":
+        if progress_callback is not None:
+            progress_callback(f"TAR 提取 cycle.json: {archive_path.name}")
+        with tarfile.open(archive_path, "r:*") as tf:
+            for member in tf.getmembers():
+                if not member.isfile():
+                    continue
+                member_name = normalize_zip_member(member.name)
+                if Path(member_name).name.lower() != "cycle.json":
+                    continue
+                src = tf.extractfile(member)
+                if src is None:
+                    continue
+                with src:
+                    _write_archive_member_to_temp(temp_dir, member_name, src)
+        return
+
+    if kind == "7z":
+        sevenz_errors: list[str] = []
+        try:
+            _extract_cycle_json_only_with_7z_command(
+                archive_path,
+                temp_dir,
+                progress_callback=progress_callback,
+            )
+            return
+        except Exception as cmd_exc:
+            sevenz_errors.append(f"7z command: {cmd_exc}")
+        try:
+            import py7zr  # type: ignore  # pylint: disable=import-error,import-outside-toplevel
+
+            with py7zr.SevenZipFile(archive_path, "r") as zf:
+                cycle_targets = [
+                    name
+                    for name in zf.getnames()
+                    if Path(normalize_zip_member(name)).name.lower() == "cycle.json"
+                ]
+                if cycle_targets:
+                    zf.extract(path=temp_dir, targets=cycle_targets)
+            return
+        except Exception as lib_exc:
+            sevenz_errors.append(f"py7zr: {lib_exc}")
+            raise RuntimeError("7z cycle.json extraction failed: " + " | ".join(sevenz_errors)) from lib_exc
+
+    if kind == "rar":
+        rar_errors: list[str] = []
+        try:
+            _extract_cycle_json_only_with_7z_command(
+                archive_path,
+                temp_dir,
+                require_rar_support=True,
+                progress_callback=progress_callback,
+            )
+            return
+        except Exception as cmd_exc:
+            rar_errors.append(f"unrar/7z command: {cmd_exc}")
+        try:
+            import rarfile  # type: ignore  # pylint: disable=import-error,import-outside-toplevel
+
+            with rarfile.RarFile(archive_path) as rf:
+                for info in rf.infolist():
+                    if info.isdir():
+                        continue
+                    member_name = normalize_zip_member(info.filename)
+                    if Path(member_name).name.lower() != "cycle.json":
+                        continue
+                    with rf.open(info) as src:
+                        _write_archive_member_to_temp(temp_dir, member_name, src)
+            return
+        except Exception as lib_exc:
+            rar_errors.append(f"rarfile: {lib_exc}")
+            raise RuntimeError(_friendly_rar_extract_error(rar_errors)) from lib_exc
+
+    if kind == "sfx_exe":
+        detected = _detect_embedded_archive_in_sfx_exe(archive_path)
+        if not detected:
+            raise ValueError(
+                "未在 EXE 中识别到可用压缩数据（ZIP/7z/RAR）。"
+                "请确认该文件是导航数据自解压包，或改用原始压缩包。"
+            )
+        embedded_kind, offset = detected
+        if progress_callback is not None:
+            progress_callback(f"检测到 EXE 内嵌压缩包格式: {embedded_kind}")
+        ext_map = {"zip": ".zip", "7z": ".7z", "rar": ".rar"}
+        payload_path = temp_dir / f"_embedded_payload{ext_map.get(embedded_kind, '.bin')}"
+        with archive_path.open("rb") as src, payload_path.open("wb") as dst:
+            src.seek(offset)
+            shutil.copyfileobj(src, dst)
+        try:
+            _extract_cycle_jsons_to_temp_by_kind(
+                payload_path,
+                temp_dir,
+                kind=embedded_kind,
+                progress_callback=progress_callback,
+            )
+        finally:
+            try:
+                payload_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return
+
+    raise ValueError(f"Unsupported archive format: {archive_path.name}")
+
+
+def extract_archive_cycle_json_to_temp(
+    archive_path: Path,
+    progress_callback: Callable[[str], None] | None = None,
+) -> Path:
+    LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+    temp_dir = Path(tempfile.mkdtemp(prefix="fms_cycle_probe_", dir=str(LOCAL_DIR)))
+    kind = _archive_kind(archive_path)
+    if not kind:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise ValueError(f"Unsupported archive format: {archive_path.name}")
+    try:
+        if progress_callback is not None:
+            progress_callback(f"检测到压缩格式: {kind}")
+        _extract_cycle_jsons_to_temp_by_kind(
+            archive_path,
+            temp_dir,
+            kind=kind,
+            progress_callback=progress_callback,
+        )
+        return temp_dir
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+
 def extract_archive_to_temp(
     archive_path: Path,
     progress_callback: Callable[[str], None] | None = None,
@@ -985,20 +1193,28 @@ def prepare_archive_payload(
 ) -> dict | None:
     if progress_callback is not None:
         progress_callback(f"开始解析压缩包: {archive_path.name}")
-    extracted_root = extract_archive_to_temp(archive_path, progress_callback=progress_callback)
+    probe_root = extract_archive_cycle_json_to_temp(archive_path, progress_callback=progress_callback)
     if progress_callback is not None:
         progress_callback("正在定位 cycle.json...")
-    payload = inspect_extracted_cycle_payload(extracted_root)
+    payload = inspect_extracted_cycle_payload(probe_root)
     if not payload:
         if progress_callback is not None:
             progress_callback("未找到有效 cycle.json")
-        cleanup_temp_dir(extracted_root)
+        cleanup_temp_dir(probe_root)
         return None
+    payload_dir = Path(str(payload.get("payload_dir", "")).strip())
+    payload_prefix = ""
+    if payload_dir:
+        try:
+            payload_prefix = str(payload_dir.relative_to(probe_root)).replace("\\", "/")
+        except Exception:
+            payload_prefix = ""
     if progress_callback is not None:
         progress_callback(
             f"解析成功: AIRAC {payload.get('airac', 'UNKNOWN')}, payload={payload.get('payload_dir', '')}"
         )
-    payload["extracted_root"] = str(extracted_root)
+    payload["probe_root"] = str(probe_root)
+    payload["payload_prefix"] = payload_prefix
     return payload
 
 
@@ -1663,6 +1879,23 @@ def normalize_backup_power_login_url(raw_url: str) -> str:
     return f"http://{text.strip('/').strip()}/api/auth/login"
 
 
+def normalize_cache_root_dir(raw_path: str) -> str:
+    text = str(raw_path or "").strip()
+    if not text:
+        return ""
+    return str(Path(os.path.expandvars(text)).expanduser())
+
+
+def resolve_cache_root_dir(state: dict[str, Any] | None = None, *, create: bool = False) -> Path:
+    configured = ""
+    if isinstance(state, dict):
+        configured = normalize_cache_root_dir(str(state.get("cache_root_dir", "")))
+    root = Path(configured) if configured else BACKUP_DIR
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def normalize_backup_power_download_dir(raw_path: str) -> str:
     text = str(raw_path or "").strip()
     if not text:
@@ -1670,8 +1903,12 @@ def normalize_backup_power_download_dir(raw_path: str) -> str:
     return str(Path(os.path.expandvars(text)).expanduser())
 
 
-def default_backup_power_download_dir() -> Path:
-    return BACKUP_DIR / "_openlist_cache"
+def default_backup_power_download_dir(state: dict[str, Any] | None = None) -> Path:
+    return resolve_cache_root_dir(state, create=False) / "_openlist_cache"
+
+
+def default_batch_download_cache_dir(state: dict[str, Any] | None = None) -> Path:
+    return resolve_cache_root_dir(state, create=False) / "_openlist_batch_cache"
 
 
 def resolve_existing_backup_power_download_dir(state: dict[str, Any]) -> Path | None:
@@ -1680,7 +1917,7 @@ def resolve_existing_backup_power_download_dir(state: dict[str, Any]) -> Path | 
         candidate = Path(configured)
         if candidate.exists() and candidate.is_dir():
             return candidate
-    default_dir = default_backup_power_download_dir()
+    default_dir = default_backup_power_download_dir(state)
     if default_dir.exists() and default_dir.is_dir():
         return default_dir
     return None
@@ -1698,11 +1935,93 @@ def ensure_backup_power_download_dir(raw_path: str, *, create: bool = True) -> P
     return target
 
 
-def cleanup_backup_power_download_cache() -> None:
-    cache_dir = default_backup_power_download_dir()
+def cleanup_backup_power_download_cache(state: dict[str, Any] | None = None) -> None:
+    cache_dir = default_backup_power_download_dir(state)
     if not cache_dir.exists():
         return
     shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def normalize_cache_cleanup_days(raw_value: Any) -> int:
+    try:
+        value = int(str(raw_value).strip())
+    except Exception:
+        return DEFAULT_CACHE_CLEANUP_DAYS
+    if value in CACHE_CLEANUP_DAY_OPTIONS:
+        return value
+    if value <= min(CACHE_CLEANUP_DAY_OPTIONS):
+        return min(CACHE_CLEANUP_DAY_OPTIONS)
+    if value >= max(CACHE_CLEANUP_DAY_OPTIONS):
+        return max(CACHE_CLEANUP_DAY_OPTIONS)
+    return DEFAULT_CACHE_CLEANUP_DAYS
+
+
+def _parse_cleanup_timestamp(raw_value: Any) -> datetime | None:
+    text = str(raw_value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt)
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def _remove_if_older_than(path: Path, cutoff_ts: float) -> bool:
+    try:
+        mtime = path.stat().st_mtime
+    except Exception:
+        return False
+    if mtime >= cutoff_ts:
+        return False
+    try:
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def cleanup_stale_cache_entries(state: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
+    days = normalize_cache_cleanup_days(state.get("cache_cleanup_days", DEFAULT_CACHE_CLEANUP_DAYS))
+    state["cache_cleanup_days"] = days
+    now = datetime.now()
+    last_cleanup = _parse_cleanup_timestamp(state.get("cache_last_cleanup_at", ""))
+    if not force and last_cleanup is not None and now - last_cleanup < timedelta(days=days):
+        return {"ran": False, "days": days, "removed": 0}
+
+    cutoff_ts = (now - timedelta(days=days)).timestamp()
+    removed_count = 0
+    scan_targets = [
+        default_backup_power_download_dir(state),
+        default_batch_download_cache_dir(state),
+    ]
+    for base in scan_targets:
+        if not base.exists():
+            continue
+        for child in list(base.iterdir()):
+            if _remove_if_older_than(child, cutoff_ts):
+                removed_count += 1
+        try:
+            has_entries = any(base.iterdir())
+        except Exception:
+            has_entries = True
+        if not has_entries:
+            _remove_if_older_than(base, cutoff_ts)
+
+    for pattern in ("fms_archive_*", "fms_cycle_probe_*"):
+        for path in LOCAL_DIR.glob(pattern):
+            if _remove_if_older_than(path, cutoff_ts):
+                removed_count += 1
+
+    state["cache_last_cleanup_at"] = now.strftime("%Y-%m-%d %H:%M:%S")
+    return {"ran": True, "days": days, "removed": removed_count}
 
 
 def normalize_batch_download_workers(raw_value: Any) -> int:
@@ -1736,6 +2055,9 @@ def load_state() -> dict:
             "backup_power_token": "",
             "backup_power_last_login_at": "",
             "backup_power_download_dir": "",
+            "cache_root_dir": "",
+            "cache_cleanup_days": DEFAULT_CACHE_CLEANUP_DAYS,
+            "cache_last_cleanup_at": "",
             "addon_install_cycles": {},
             "batch_download_workers": DEFAULT_BATCH_DOWNLOAD_WORKERS,
         }
@@ -1765,6 +2087,11 @@ def load_state() -> dict:
         state.setdefault("backup_power_token", "")
         state.setdefault("backup_power_last_login_at", "")
         state["backup_power_download_dir"] = normalize_backup_power_download_dir(state.get("backup_power_download_dir", ""))
+        state["cache_root_dir"] = normalize_cache_root_dir(state.get("cache_root_dir", ""))
+        state["cache_cleanup_days"] = normalize_cache_cleanup_days(
+            state.get("cache_cleanup_days", DEFAULT_CACHE_CLEANUP_DAYS)
+        )
+        state.setdefault("cache_last_cleanup_at", "")
         if not isinstance(state.get("addon_install_cycles"), dict):
             state["addon_install_cycles"] = {}
         state["batch_download_workers"] = normalize_batch_download_workers(
@@ -1787,15 +2114,22 @@ def load_state() -> dict:
             "backup_power_token": "",
             "backup_power_last_login_at": "",
             "backup_power_download_dir": "",
+            "cache_root_dir": "",
+            "cache_cleanup_days": DEFAULT_CACHE_CLEANUP_DAYS,
+            "cache_last_cleanup_at": "",
             "addon_install_cycles": {},
             "batch_download_workers": DEFAULT_BATCH_DOWNLOAD_WORKERS,
         }
 
 
+def current_log_file() -> Path:
+    return LOG_DIR / f"{datetime.now().strftime('%Y-%m-%d')}.log"
+
+
 def append_log_file(line: str) -> None:
     try:
-        ROAMING_DIR.mkdir(parents=True, exist_ok=True)
-        with LOG_FILE.open("a", encoding="utf-8") as fh:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with current_log_file().open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except Exception:
         pass
@@ -1805,32 +2139,30 @@ def read_log_lines(limit: int = 400) -> list[str]:
     if limit <= 0:
         return []
     try:
-        if not LOG_FILE.exists():
+        parsed_lines: list[str] = []
+        current_file = current_log_file()
+        use_current_file = current_file.exists()
+        if use_current_file:
+            lines = current_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+        elif LEGACY_LOG_FILE.exists():
+            lines = LEGACY_LOG_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+        else:
             return []
-        lines = LOG_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
         today = datetime.now().strftime("%Y-%m-%d")
-        dated_today: list[str] = []
-        legacy_lines: list[str] = []
-        has_dated_line = False
         for raw in lines:
             line = raw.strip()
             if not line:
                 continue
             dated_match = re.match(r"^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\]\s?(.*)$", line)
             if dated_match:
-                has_dated_line = True
-                if dated_match.group(1) == today:
+                if use_current_file or dated_match.group(1) == today:
                     msg = dated_match.group(3)
-                    dated_today.append(f"[{dated_match.group(2)}] {msg}")
+                    parsed_lines.append(f"[{dated_match.group(2)}] {msg}")
                 continue
             legacy_match = re.match(r"^\[(\d{2}:\d{2}:\d{2})\]\s?(.*)$", line)
             if legacy_match:
-                legacy_lines.append(line)
-        if dated_today:
-            return dated_today[-limit:]
-        if not has_dated_line:
-            return legacy_lines[-limit:]
-        return []
+                parsed_lines.append(line)
+        return parsed_lines[-limit:]
     except Exception:
         return []
 
@@ -2751,7 +3083,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     cached_cycle: dict | None = None,
 ):
     ft.context.disable_auto_update()
-    for d in (ROAMING_DIR, LOCAL_DIR, EXTRACTED_DIR, BACKUP_DIR):
+    for d in (ROAMING_DIR, LOG_DIR, LOCAL_DIR, EXTRACTED_DIR, BACKUP_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
     state = load_state()
@@ -3590,73 +3922,92 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     def perform_archive_update_install(
         addon: Addon,
         target: Path,
-        extracted_root: Path,
-        payload_dir: Path,
+        archive_path: Path,
         archive_name: str,
         archive_airac: str,
         progress_callback: Callable[[str], None] | None = None,
     ) -> dict:
         if progress_callback is not None:
             progress_callback(f"开始安装: {addon.name}")
-        install_base = target
-        if is_a346_addon(addon) and re.fullmatch(r"cycle[_-]?[0-9]{4}", target.name, re.IGNORECASE):
-            install_base = target.parent
-        if install_base.exists() and not install_base.is_dir():
-            raise ValueError(f"Target path is not a folder: {install_base}")
-
-        backup_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        safe_name = addon.name.replace("/", "_").replace("\\", "_")
-        backup_path: Path | None = None
-        if install_base.exists():
+        extracted_root: Path | None = None
+        try:
             if progress_callback is not None:
-                progress_callback("备份现有导航数据...")
-            addon_backup_root = BACKUP_DIR / safe_name
-            addon_backup_root.mkdir(parents=True, exist_ok=True)
-            backup_path = addon_backup_root / backup_stamp
-            shutil.copytree(install_base, backup_path, dirs_exist_ok=True)
+                progress_callback("正在解压压缩包主体文件...")
+            extracted_root = extract_archive_to_temp(archive_path, progress_callback=progress_callback)
+            if progress_callback is not None:
+                progress_callback("正在定位安装载荷...")
+            archive_payload = inspect_extracted_cycle_payload(extracted_root)
+            if not archive_payload:
+                raise ValueError("压缩包中未找到可用 cycle.json，无法安装")
+            payload_dir = Path(str(archive_payload.get("payload_dir", "")).strip())
+            if not payload_dir.exists() or not payload_dir.is_dir():
+                raise ValueError(f"无效安装载荷目录: {payload_dir}")
+
+            install_base = target
+            if is_a346_addon(addon) and re.fullmatch(r"cycle[_-]?[0-9]{4}", target.name, re.IGNORECASE):
+                install_base = target.parent
+            if install_base.exists() and not install_base.is_dir():
+                raise ValueError(f"Target path is not a folder: {install_base}")
+
+            backup_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            safe_name = addon.name.replace("/", "_").replace("\\", "_")
+            backup_path: Path | None = None
+            if install_base.exists():
+                if progress_callback is not None:
+                    progress_callback("备份现有导航数据...")
+                addon_backup_root = BACKUP_DIR / safe_name
+                addon_backup_root.mkdir(parents=True, exist_ok=True)
+                backup_path = addon_backup_root / backup_stamp
+                shutil.copytree(install_base, backup_path, dirs_exist_ok=True)
+
+                if progress_callback is not None:
+                    progress_callback("清理旧文件...")
+                for child in install_base.iterdir():
+                    if child.is_dir():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink(missing_ok=True)
+            else:
+                install_base.mkdir(parents=True, exist_ok=True)
+                if progress_callback is not None:
+                    progress_callback("创建安装目录...")
 
             if progress_callback is not None:
-                progress_callback("清理旧文件...")
-            for child in install_base.iterdir():
-                if child.is_dir():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink(missing_ok=True)
-        else:
-            install_base.mkdir(parents=True, exist_ok=True)
+                progress_callback("复制新导航数据文件...")
+            extracted_files, install_root = copy_payload_dir_to_target(
+                addon=addon,
+                payload_dir=payload_dir,
+                install_base=install_base,
+                airac=archive_airac,
+            )
+            if extracted_files <= 0:
+                raise ValueError("No files were extracted from archive payload.")
+
+            payload_airac = detect_airac(str(archive_payload.get("airac", "UNKNOWN")))
+            airac = archive_airac if archive_airac != "UNKNOWN" else payload_airac
+            if airac == "UNKNOWN":
+                airac = read_cycle_from_dir(install_base)
+            (install_base / "airac.txt").write_text(f"AIRAC {airac}\n", encoding="utf-8")
             if progress_callback is not None:
-                progress_callback("创建安装目录...")
-
-        if progress_callback is not None:
-            progress_callback("复制新导航数据文件...")
-        extracted_files, install_root = copy_payload_dir_to_target(
-            addon=addon,
-            payload_dir=payload_dir,
-            install_base=install_base,
-            airac=archive_airac,
-        )
-        if extracted_files <= 0:
-            raise ValueError("No files were extracted from archive payload.")
-
-        airac = archive_airac if archive_airac != "UNKNOWN" else read_cycle_from_dir(install_base)
-        (install_base / "airac.txt").write_text(f"AIRAC {airac}\n", encoding="utf-8")
-        if progress_callback is not None:
-            progress_callback(f"安装完成: AIRAC {airac}")
-        return {
-            "backup_path": str(backup_path) if backup_path else "",
-            "airac": airac,
-            "install_base": str(install_base),
-            "install_root": str(install_root),
-            "extracted_files": extracted_files,
-            "archive_name": archive_name,
-            "extracted_root": str(extracted_root),
-        }
+                progress_callback(f"安装完成: AIRAC {airac}")
+            return {
+                "backup_path": str(backup_path) if backup_path else "",
+                "airac": airac,
+                "install_base": str(install_base),
+                "install_root": str(install_root),
+                "extracted_files": extracted_files,
+                "archive_name": archive_name,
+                "extracted_root": str(extracted_root),
+            }
+        except Exception:
+            if extracted_root is not None:
+                cleanup_temp_dir(extracted_root)
+            raise
 
     def start_archive_update(
         addon: Addon,
         target: Path,
-        extracted_root: Path,
-        payload_dir: Path,
+        archive_path: Path,
         archive_name: str,
         archive_airac: str,
         *,
@@ -3664,6 +4015,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         run_in_background: bool = True,
     ) -> asyncio.Task[bool] | None:
         async def runner() -> bool:
+            install_temp_root: Path | None = None
             try:
                 open_install_overlay(title=f"安装状态 - {addon.name}", reset=False)
                 log(f"{addon.name}: begin install from archive '{archive_name}'")
@@ -3673,8 +4025,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     perform_archive_update_install,
                     addon,
                     target,
-                    extracted_root,
-                    payload_dir,
+                    archive_path,
                     archive_name,
                     archive_airac,
                     message=f"正在更新 {addon.name}",
@@ -3683,6 +4034,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     provide_progress_callback=True,
                     show_page_loading=False,
                 )
+                install_temp_root_raw = str(result.get("extracted_root", "")).strip()
+                if install_temp_root_raw:
+                    install_temp_root = Path(install_temp_root_raw)
                 if result.get("backup_path"):
                     log(f"{addon.name}: backup created at {result['backup_path']}")
                     append_install_overlay_line(f"已备份旧数据: {result['backup_path']}")
@@ -3720,8 +4074,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     show_info_dialog("更新失败", f"{addon.name} 更新失败。\n\n错误详情：{exc}")
                 return False
             finally:
-                await asyncio.to_thread(cleanup_backup_power_download_cache)
-                await asyncio.to_thread(cleanup_temp_dir, extracted_root)
+                await asyncio.to_thread(cleanup_backup_power_download_cache, state)
+                if install_temp_root is not None:
+                    await asyncio.to_thread(cleanup_temp_dir, install_temp_root)
                 await rebuild_lists_async(show_loading=False)
 
         if run_in_background:
@@ -3776,23 +4131,23 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
         try:
             log(f"{addon.name}: parsing archive payload from {archive_path.name}")
-            append_install_overlay_line("正在检查并解压压缩包...")
+            append_install_overlay_line("正在提取 cycle.json 并校验...")
             archive_payload = await run_blocking_with_feedback(
                 prepare_archive_payload,
                 archive_path,
-                message="正在检查并解压压缩包",
+                message="正在提取并校验 cycle.json",
                 pulse_interval=0.25,
                 progress_callback=append_install_overlay_line,
                 provide_progress_callback=True,
                 show_page_loading=False,
             )
         except Exception as exc:
-            append_install_overlay_line(f"解压失败: {exc}")
-            snack(f"解压失败: {exc}")
+            append_install_overlay_line(f"cycle 校验失败: {exc}")
+            snack(f"cycle 校验失败: {exc}")
             if show_result_dialog:
                 show_info_dialog(
-                    "解压失败",
-                    f"{addon.name} 压缩包解压失败。\n\n压缩包: {archive_path.name}\n错误详情：{exc}",
+                    "校验失败",
+                    f"{addon.name} cycle.json 校验失败。\n\n压缩包: {archive_path.name}\n错误详情：{exc}",
                 )
             await rebuild_lists_async(show_loading=False)
             return False
@@ -3808,27 +4163,29 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             return False
         await rebuild_lists_async(show_loading=False)
 
-        extracted_root = Path(str(archive_payload.get("extracted_root", "")))
-        payload_dir = Path(str(archive_payload.get("payload_dir", "")))
+        probe_root_raw = str(archive_payload.get("probe_root", "")).strip()
+        probe_root = Path(probe_root_raw) if probe_root_raw else None
+        payload_prefix = str(archive_payload.get("payload_prefix", "")).strip()
         archive_airac = str(archive_payload.get("airac", "UNKNOWN"))
         cycle_name = str(archive_payload.get("cycle_name", "")).strip()
         log(
             f"{addon.name}: archive parsed, cycle_name='{cycle_name or '<empty>'}', "
-            f"airac={archive_airac}, payload={payload_dir}"
+            f"airac={archive_airac}, payload_prefix='{payload_prefix or '<root>'}'"
         )
         append_install_overlay_line(
             f"压缩包校验完成: 机型名称 '{cycle_name or '空'}'，AIRAC {archive_airac}"
         )
+        if probe_root is not None:
+            await asyncio.to_thread(cleanup_temp_dir, probe_root)
 
         async def continue_install_async() -> bool:
             log(f"{addon.name}: archive validation passed, installing...")
-            append_install_overlay_line("压缩包校验通过，开始安装...")
+            append_install_overlay_line("压缩包校验通过，开始解压并安装...")
             clear_force_install_prompt(refresh=False)
             task = start_archive_update(
                 addon=addon,
                 target=target,
-                extracted_root=extracted_root,
-                payload_dir=payload_dir,
+                archive_path=archive_path,
                 archive_name=archive_path.name,
                 archive_airac=archive_airac,
                 show_result_dialog=show_result_dialog,
@@ -3844,7 +4201,6 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         def cancel_install(reason: str) -> None:
             log(f"{addon.name}: update canceled by user ({reason})")
             append_install_overlay_line(f"用户取消安装（{reason}）")
-            cleanup_temp_dir(extracted_root)
 
         cycle_name_norm = cycle_name.strip().lower()
         if not cycle_name_norm:
@@ -3931,8 +4287,18 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 else:
                     snack(message)
                 return False
-            is_logged_in = bool(str(state.get("backup_power_token", "")).strip())
-            if is_logged_in and is_default_catalog_addon(addon):
+            token = str(state.get("backup_power_token", "")).strip()
+            can_auto_download = False
+            if token and is_default_catalog_addon(addon):
+                can_auto_download = await refresh_backup_power_login_validity(notify_invalid=False)
+                if not can_auto_download:
+                    manual_only_message = "DATA(data.cnrpg.top) 登录状态失效，仅支持手动选择本地压缩包安装。"
+                    log(f"{addon.name}: {manual_only_message}")
+                    if bulk_mode:
+                        append_install_overlay_line(f"{addon.name}: 跳过（登录失效，批量模式不允许手动选包）")
+                        return False
+                    snack(manual_only_message)
+            if can_auto_download and is_default_catalog_addon(addon):
                 cycle_id = detect_airac(str(forced_cycle_id or ""))
                 if cycle_id in {"", "UNKNOWN"} and current_cycle_info and current_cycle_info.get("cycle_id"):
                     cycle_id = detect_airac(str(current_cycle_info.get("cycle_id", "")))
@@ -3947,7 +4313,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     else:
                         snack(message)
                     return False
-                download_dir = ensure_backup_power_download_dir(str(default_backup_power_download_dir()), create=True)
+                download_dir = ensure_backup_power_download_dir(str(default_backup_power_download_dir(state)), create=True)
                 try:
                     if bulk_mode:
                         if not install_overlay_container.visible:
@@ -4750,14 +5116,37 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 options=[ft.dropdown.Option(str(v)) for v in BATCH_DOWNLOAD_WORKER_OPTIONS],
                 width=220,
             )
+            default_cache_root_display = str(resolve_cache_root_dir(None, create=False))
+            configured_cache_root = normalize_cache_root_dir(str(state.get("cache_root_dir", "")).strip())
+            cache_root_field = ft.TextField(
+                label="缓存目录（可选）",
+                value=configured_cache_root or default_cache_root_display,
+                hint_text=r"留空使用默认内部目录",
+                expand=True,
+            )
+            cache_cleanup_days = normalize_cache_cleanup_days(
+                state.get("cache_cleanup_days", DEFAULT_CACHE_CLEANUP_DAYS)
+            )
+            cache_cleanup_days_dd = ft.Dropdown(
+                label="缓存自动清理周期（天）",
+                value=str(cache_cleanup_days),
+                options=[ft.dropdown.Option(str(v)) for v in CACHE_CLEANUP_DAY_OPTIONS],
+                width=220,
+            )
             err = ft.Text("", size=fs(12), color="#b83d4b")
             dlg: ft.Control | None = None
             browse20_btn = ft.Button("浏览")
             browse24_btn = ft.Button("浏览")
             browse24_extra_btn = ft.Button("浏览")
+            browse_cache_btn = ft.Button("修改")
 
             for ctrl in list(page.services):
-                if isinstance(ctrl, ft.FilePicker) and getattr(ctrl, "data", None) in {"settings_comm_picker_20", "settings_comm_picker_24", "settings_comm_picker_24_extra"}:
+                if isinstance(ctrl, ft.FilePicker) and getattr(ctrl, "data", None) in {
+                    "settings_comm_picker_20",
+                    "settings_comm_picker_24",
+                    "settings_comm_picker_24_extra",
+                    "settings_cache_picker",
+                }:
                     try:
                         page.services.remove(ctrl)
                     except ValueError:
@@ -4768,7 +5157,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             picker24.data = "settings_comm_picker_24"
             picker24_extra = ft.FilePicker()
             picker24_extra.data = "settings_comm_picker_24_extra"
-            page.services.extend([picker20, picker24, picker24_extra])
+            picker_cache = ft.FilePicker()
+            picker_cache.data = "settings_cache_picker"
+            page.services.extend([picker20, picker24, picker24_extra, picker_cache])
 
             def close_dialog(_evt=None) -> None:
                 close_custom_modal()
@@ -4812,9 +5203,23 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
                 page.run_task(runner)
 
+            def browse_cache_dir(_evt) -> None:
+                async def runner() -> None:
+                    try:
+                        path = await picker_cache.get_directory_path(dialog_title="选择缓存目录")
+                        if path:
+                            cache_root_field.value = path
+                            page.update()
+                    except Exception as exc:
+                        err.value = f"选择目录失败: {exc}"
+                        page.update()
+
+                page.run_task(runner)
+
             browse20_btn.on_click = browse_fs20
             browse24_btn.on_click = browse_fs24
             browse24_extra_btn.on_click = browse_fs24_extra
+            browse_cache_btn.on_click = browse_cache_dir
 
             def refresh_field_status() -> None:
                 fs20_field.disabled = not bool(has20_check.value)
@@ -4836,6 +5241,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 p24 = fs24_field.value.strip()
                 p24_extra = fs24_extra_field.value.strip()
                 workers = normalize_batch_download_workers(workers_dd.value)
+                cache_root_raw = cache_root_field.value.strip()
+                cache_root_normalized = normalize_cache_root_dir(cache_root_raw)
+                default_cache_root_normalized = normalize_cache_root_dir(default_cache_root_display)
+                cache_root_to_save = (
+                    ""
+                    if cache_root_normalized == default_cache_root_normalized
+                    else cache_root_normalized
+                )
+                cleanup_days = normalize_cache_cleanup_days(cache_cleanup_days_dd.value)
                 has20_selected = bool(has20_check.value)
                 has24_selected = bool(has24_check.value)
                 if not has20_selected and not has24_selected:
@@ -4854,12 +5268,27 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     err.value = "MSFS 2024 已启用，请填写有效的 FS24 Community2024 路径（目录名需为 Community2024 或 Community）。"
                     page.update()
                     return
+                effective_cache_root = cache_root_to_save or default_cache_root_normalized
+                if effective_cache_root:
+                    cache_root_path = Path(effective_cache_root)
+                    if cache_root_path.exists() and not cache_root_path.is_dir():
+                        err.value = "缓存目录路径无效：该路径存在但不是目录。"
+                        page.update()
+                        return
+                    try:
+                        cache_root_path.mkdir(parents=True, exist_ok=True)
+                    except Exception as exc:
+                        err.value = f"创建缓存目录失败: {exc}"
+                        page.update()
+                        return
                 state.setdefault("community_paths", {})[key20] = p20
                 state.setdefault("community_paths", {})[key24] = p24
                 state.setdefault("community_2024_paths", {})[key24_extra] = p24_extra
                 state.setdefault("enabled_simulators", {})["MSFS 2020"] = has20_selected
                 state.setdefault("enabled_simulators", {})["MSFS 2024"] = has24_selected
                 state["batch_download_workers"] = workers
+                state["cache_root_dir"] = cache_root_to_save
+                state["cache_cleanup_days"] = cleanup_days
                 nonlocal simulator
                 enabled_now = enabled_simulators(state)
                 if simulator not in enabled_now:
@@ -4883,8 +5312,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     ft.Row(spacing=8, controls=[fs24_field, browse24_btn]),
                     ft.Row(spacing=8, controls=[fs24_extra_field, browse24_extra_btn]),
                     ft.Row(spacing=8, controls=[workers_dd]),
+                    ft.Row(spacing=8, controls=[cache_root_field, browse_cache_btn]),
+                    ft.Row(spacing=8, controls=[cache_cleanup_days_dd]),
+                    ft.Text(f"默认缓存目录: {default_cache_root_display}", size=fs(12), color=colors["text_meta"]),
                     ft.Text("目录必须存在；FS20/FS24 目录名需为 Community，FS24 Community2024 路径目录名需为 Community2024 或 Community。", size=fs(12), color=colors["text_meta"]),
                     ft.Text("一键安装会并发下载，线程越大下载越快，但网络与服务器压力更高。", size=fs(12), color=colors["text_meta"]),
+                    ft.Text("缓存目录留空时使用默认内部目录；程序会按“缓存自动清理周期”清理过期缓存。", size=fs(12), color=colors["text_meta"]),
                     err,
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
@@ -5074,7 +5507,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 user = user_field.value.strip()
                 if not user:
                     raise ValueError("请填写账号。")
-                download_dir_path = ensure_backup_power_download_dir(str(default_backup_power_download_dir()), create=True)
+                download_dir_path = ensure_backup_power_download_dir(str(default_backup_power_download_dir(state)), create=True)
                 state["backup_power_download_dir"] = str(download_dir_path)
                 state["backup_power_api_url"] = BACKUP_POWER_LOGIN_URL
                 state["backup_power_username"] = user
@@ -5275,7 +5708,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         color=colors["text_sub"],
                     ),
                     ft.Text(
-                        "OpenList 下载缓存目录已改为软件内部缓存目录，安装完成后会自动清理，无需手动设置。",
+                        "OpenList 缓存目录可在“设置”中自定义，安装后会自动清理下载缓存。",
                         size=fs(11),
                         color=colors["text_sub"],
                     ),
@@ -5447,7 +5880,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             try:
                 login_ok = await refresh_backup_power_login_validity(notify_invalid=True)
                 if not login_ok:
-                    snack("请先完成有效登录后，再执行一键安装。")
+                    snack("DATA(data.cnrpg.top) 登录状态失效时仅支持手动本地压缩包安装；一键安装不可用。")
                     return
                 scoped_addons = [a for a in addons_all if a.simulator == simulator and a.platform == platform]
                 if not scoped_addons:
@@ -5514,7 +5947,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     state.get("batch_download_workers", DEFAULT_BATCH_DOWNLOAD_WORKERS)
                 )
                 append_install_overlay_line(f"进入并发下载阶段（线程数: {max_download_workers}）")
-                batch_download_root = BACKUP_DIR / "_openlist_batch_cache"
+                batch_download_root = default_batch_download_cache_dir(state)
                 await asyncio.to_thread(batch_download_root.mkdir, parents=True, exist_ok=True)
 
                 sem = asyncio.Semaphore(max_download_workers)
@@ -5585,7 +6018,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 snack(f"一键安装失败: {exc}")
             finally:
                 try:
-                    await asyncio.to_thread(shutil.rmtree, BACKUP_DIR / "_openlist_batch_cache", True)
+                    await asyncio.to_thread(shutil.rmtree, default_batch_download_cache_dir(state), True)
                 except Exception:
                     pass
                 set_button_busy(button, False)
@@ -5594,8 +6027,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def on_open_log_folder_click(_e):
         try:
-            ROAMING_DIR.mkdir(parents=True, exist_ok=True)
-            open_folder(str(LOG_FILE.parent))
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            open_folder(str(LOG_DIR))
         except Exception as exc:
             snack(f"打开日志文件夹失败: {exc}")
 
@@ -6127,6 +6560,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         show_loading_state("正在初始化...")
 
         async def bootstrap() -> None:
+            cleanup_result = await asyncio.to_thread(cleanup_stale_cache_entries, state)
+            if cleanup_result.get("ran"):
+                save_state(state)
+                removed = int(cleanup_result.get("removed", 0))
+                days = int(cleanup_result.get("days", DEFAULT_CACHE_CLEANUP_DAYS))
+                log(f"缓存定期清理完成：清理周期 {days} 天，删除 {removed} 项过期缓存。")
             await refresh_backup_power_login_validity(notify_invalid=False)
             await refresh_cycle_async(notify_fail=False)
             await rescan_and_rebuild_async(show_loading=False, notify_done=False)

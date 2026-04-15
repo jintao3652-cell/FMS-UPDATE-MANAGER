@@ -1,0 +1,30 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="FMS UPDATE MANAGER"
+           Manufacturer="CNRPG"
+           Version="1.0.0"
+           UpgradeCode="3EFC6484-8AD8-4D4E-BFAA-4ED17A58B5A6"
+           Language="1033">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="assets\\travel_airplane.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="FMS UPDATE MANAGER" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="FMS UPDATE MANAGER" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.SourceDir)\\**" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>
