@@ -29,6 +29,15 @@ import flet as ft
 ft.context.disable_auto_update()
 
 APP_NAME = "FMS UPDATE MANAGER"
+APP_EXECUTABLE_NAME = "FMS_UPDATE_MANAGER.exe"
+INSTALLER_PACKAGE_NAME = "FMS_UPDATE_MANAGER_Installer.msi"
+INSTALLER_EXECUTABLE_NAME = "FMS_UPDATE_MANAGER_Installer.exe"
+INSTALLER_COMMANDLINE_HINTS = (
+    INSTALLER_PACKAGE_NAME.lower(),
+    INSTALLER_EXECUTABLE_NAME.lower(),
+    "fms_update_manager_installer",
+    "fms update manager installer",
+)
 ROAMING_DIR = Path(os.path.expandvars(r"%APPDATA%")) / APP_NAME
 LOCAL_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%")) / APP_NAME
 TASKBAR_ICON_FILE = Path(__file__).resolve().parent / "assets" / "travel_airplane.ico"
@@ -51,7 +60,7 @@ OPENLIST_ROOT_PATH = "/"
 OPENLIST_USERNAME = "navdata"
 OPENLIST_PASSWORD = "navdata"
 OPENLIST_TOKEN_CACHE = ""
-APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.0").strip() or "1.0.0"
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.1").strip() or "1.0.1"
 GITHUB_RELEASE_REPO = os.getenv("FMS_GITHUB_REPO", "jintao3652-cell/FMS-UPDATE-MANAGER").strip() or "jintao3652-cell/FMS-UPDATE-MANAGER"
 GITHUB_RELEASE_LATEST_API = "https://api.github.com/repos/{repo}/releases/latest"
 GITHUB_RELEASE_LIST_API = "https://api.github.com/repos/{repo}/releases?per_page=1"
@@ -145,6 +154,91 @@ def human_time() -> str:
 
 def human_datetime() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _startup_subprocess_kwargs() -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "ignore",
+        "check": False,
+    }
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kwargs["startupinfo"] = startupinfo
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return kwargs
+
+
+def _show_windows_message_box(title: str, message: str) -> None:
+    try:
+        ctypes.windll.user32.MessageBoxW(None, message, title, 0x10)
+    except Exception:
+        pass
+
+
+def _query_windows_processes() -> list[dict[str, Any]]:
+    if os.name != "nt":
+        return []
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$procs = Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -match '^(?i)(msiexec\.exe|FMS_UPDATE_MANAGER_Installer\.exe)$' } |
+    Select-Object ProcessId, Name, CommandLine
+if ($null -eq $procs) {
+    '[]'
+} else {
+    $procs | ConvertTo-Json -Compress
+}
+"""
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            **_startup_subprocess_kwargs(),
+        )
+        payload = (result.stdout or "").strip()
+        if result.returncode != 0 or not payload:
+            return []
+        parsed = json.loads(payload)
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        return [item for item in parsed if isinstance(item, dict)]
+    except Exception:
+        return []
+
+
+def _is_our_installer_running() -> bool:
+    current_pid = os.getpid()
+    for proc in _query_windows_processes():
+        try:
+            pid = int(proc.get("ProcessId", 0) or 0)
+        except Exception:
+            pid = 0
+        if pid == current_pid:
+            continue
+        name = str(proc.get("Name", "")).strip().lower()
+        command_line = str(proc.get("CommandLine", "")).strip().lower()
+        if name == INSTALLER_EXECUTABLE_NAME.lower():
+            return True
+        if name == "msiexec.exe" and any(hint in command_line for hint in INSTALLER_COMMANDLINE_HINTS):
+            return True
+    return False
+
+
+def _ensure_installer_not_running() -> bool:
+    if not _is_our_installer_running():
+        return True
+    _show_windows_message_box(
+        APP_NAME,
+        "检测到安装程序正在运行。\n\n"
+        "安装程序与软件不能同时运行，请二选一：\n"
+        "1. 先完成安装，再启动软件；\n"
+        "2. 或先关闭安装程序，再打开软件。",
+    )
+    return False
 
 
 def fs(size: int) -> int:
@@ -1570,6 +1664,13 @@ def backup_power_login_request(api_url: str, username: str, password: str) -> di
                 detail = str(detail_payload.get("message") or detail_payload.get("detail") or raw).strip()
             except Exception:
                 detail = raw.strip() or str(exc)
+            if exc.code == 401:
+                lowered = detail.lower()
+                if "invalid credentials" in lowered or "invalid credential" in lowered:
+                    detail = "账号或密码错误（此处为 DATA 域名登录，不支持 OpenList 账号）"
+                elif not detail:
+                    detail = "账号或密码错误（此处为 DATA 域名登录）"
+                raise ValueError(f"接口返回错误 ({exc.code}): {detail}") from exc
             raise ValueError(f"接口返回错误 ({exc.code}): {detail}") from exc
         except URLError as exc:
             if attempt < 1:
@@ -6254,6 +6355,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         color=colors["text_sub"],
                     ),
                     ft.Text(
+                        "若使用 OpenList 账号（如 admin/navdata）登录此窗口，接口通常会返回 401 invalid credentials。",
+                        size=fs(11),
+                        color=colors["text_sub"],
+                    ),
+                    ft.Text(
                         "OpenList 缓存目录可在“设置”中自定义，安装后会自动清理下载缓存。",
                         size=fs(11),
                         color=colors["text_sub"],
@@ -6451,7 +6557,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 total = len(scoped_addons)
                 success_count = 0
                 failed_count = 0
+                uninstalled_count = 0
+                up_to_date_skip_count = 0
                 skipped_count = 0
+                cloud_no_data_addons: list[str] = []
+                cloud_no_data_seen: set[str] = set()
 
                 install_jobs: list[tuple[Addon, Path, str, int]] = []
                 for idx, addon in enumerate(scoped_addons, start=1):
@@ -6463,8 +6573,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if target is None:
                         target = resolve_wasm_target_by_folder_name(addon, state)
                     if target is None:
-                        failed_count += 1
-                        append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 失败（未检测到已安装目录）")
+                        uninstalled_count += 1
+                        append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 未安装（跳过）")
                         continue
                     if target.exists() and not target.is_dir():
                         failed_count += 1
@@ -6474,13 +6584,25 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         failed_count += 1
                         append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 失败（目标父目录不存在）")
                         continue
+                    installed_cycle = detect_airac(read_cycle_from_dir(target))
+                    if installed_cycle == fallback_cycle:
+                        up_to_date_skip_count += 1
+                        append_install_overlay_line(
+                            f"[{idx}/{total}] {addon.name}: 已是最新周期 {installed_cycle}（跳过下载）"
+                        )
+                        continue
                     addon_cycle = selected_install_cycle_for_addon(addon, fallback_cycle)
                     install_jobs.append((addon, target, addon_cycle, idx))
 
                 if not install_jobs:
                     summary = (
-                        f"一键安装结束: 总计{total}，成功0，失败{failed_count}，跳过{skipped_count}"
+                        f"一键安装结束: 总计{total}，成功0，失败{failed_count}，未安装{uninstalled_count}，"
+                        f"最新已安装{up_to_date_skip_count}，云盘无数据0，跳过{skipped_count}"
                     )
+                    if uninstalled_count > 0:
+                        append_install_overlay_line(f"未安装: {uninstalled_count}")
+                    if up_to_date_skip_count > 0:
+                        append_install_overlay_line(f"已是最新（跳过下载）: {up_to_date_skip_count}")
                     append_install_overlay_line(summary)
                     snack(summary)
                     return
@@ -6498,12 +6620,27 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
                 sem = asyncio.Semaphore(max_download_workers)
 
+                def is_openlist_no_data_error(err_text: str) -> bool:
+                    text = str(err_text or "").strip().lower()
+                    if not text:
+                        return False
+                    hints = (
+                        "未找到与机型匹配的 openlist 压缩包",
+                        "openlist 未找到期数目录",
+                        "openlist 未找到 msfs 目录",
+                        "openlist 未返回可用下载链接",
+                        "目录读取失败 (404",
+                        "文件信息读取失败 (404",
+                        "not found",
+                    )
+                    return any(h in text for h in hints)
+
                 async def download_job(
                     addon: Addon,
                     target: Path,
                     cycle_id: str,
                     idx: int,
-                ) -> tuple[Addon, Path, Path | None, str | None]:
+                ) -> tuple[Addon, Path, Path | None, str | None, str | None]:
                     safe_key = re.sub(r"[^a-zA-Z0-9._-]+", "_", addon_key(addon))
                     addon_download_dir = batch_download_root / safe_key
                     await asyncio.to_thread(addon_download_dir.mkdir, parents=True, exist_ok=True)
@@ -6521,11 +6658,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             if not archive_path.exists():
                                 raise ValueError(f"下载结果文件不存在: {archive_path}")
                             append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 下载完成 -> {archive_path.name}")
-                            return addon, target, archive_path, None
+                            return addon, target, archive_path, None, None
                         except Exception as exc:
                             err = str(exc)
+                            if is_openlist_no_data_error(err):
+                                append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 云盘中无数据")
+                                return addon, target, None, err, "no_data"
                             append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 下载失败 -> {err}")
-                            return addon, target, None, err
+                            return addon, target, None, err, "error"
 
                 download_results = await asyncio.gather(
                     *[
@@ -6535,8 +6675,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 )
 
                 append_install_overlay_line("进入安装阶段（按顺序执行）")
-                for addon, target, archive_path, download_error in download_results:
+                for addon, target, archive_path, download_error, download_kind in download_results:
                     if download_error or archive_path is None:
+                        if download_kind == "no_data":
+                            if addon.name not in cloud_no_data_seen:
+                                cloud_no_data_seen.add(addon.name)
+                                cloud_no_data_addons.append(addon.name)
+                            continue
                         failed_count += 1
                         continue
                     picked = [type("PickedFile", (), {"path": str(archive_path)})()]
@@ -6555,8 +6700,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         failed_count += 1
 
                 summary = (
-                    f"一键安装完成: 总计{total}，成功{success_count}，失败{failed_count}，跳过{skipped_count}"
+                    f"一键安装完成: 总计{total}，成功{success_count}，失败{failed_count}，未安装{uninstalled_count}，"
+                    f"最新已安装{up_to_date_skip_count}，云盘无数据{len(cloud_no_data_addons)}，跳过{skipped_count}"
                 )
+                if uninstalled_count > 0:
+                    append_install_overlay_line(f"未安装: {uninstalled_count}")
+                if up_to_date_skip_count > 0:
+                    append_install_overlay_line(f"已是最新（跳过下载）: {up_to_date_skip_count}")
+                if cloud_no_data_addons:
+                    append_install_overlay_line(f"云盘中无数据: {', '.join(cloud_no_data_addons)}")
                 append_install_overlay_line(summary)
                 snack(summary)
             except Exception as exc:
@@ -6749,7 +6901,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         controls=cast(list[ft.Control], [
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    controls=[
+                    controls=cast(list[ft.Control], [
                         ft.Row(
                             spacing=10,
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -6758,7 +6910,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                     src=str(APP_WINDOW_LOGO_FILE),
                                     width=34,
                                     height=34,
-                                    fit="contain",
+                                    fit=ft.BoxFit.CONTAIN,
                                 ) if APP_WINDOW_LOGO_FILE.exists() else ft.Container(width=0, height=0),
                                 ft.Column(
                                     spacing=1,
@@ -6799,7 +6951,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 ),
                             ],
                         ),
-                    ],
+                    ]),
                 ),
                 ft.Container(
                     bgcolor=colors["panel_bg"],
@@ -7182,4 +7334,5 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
 
 if __name__ == "__main__":
-    ft.run(main)
+    if _ensure_installer_not_running():
+        ft.run(main)
