@@ -10,9 +10,11 @@ import subprocess
 import shutil
 import struct
 import time
+import webbrowser
 import zipfile
 import tempfile
 import tarfile
+import xml.etree.ElementTree as ET
 from queue import Empty, SimpleQueue
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -49,6 +51,12 @@ OPENLIST_ROOT_PATH = "/"
 OPENLIST_USERNAME = "navdata"
 OPENLIST_PASSWORD = "navdata"
 OPENLIST_TOKEN_CACHE = ""
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.0").strip() or "1.0.0"
+GITHUB_RELEASE_REPO = os.getenv("FMS_GITHUB_REPO", "jintao3652-cell/FMS-UPDATE-MANAGER").strip() or "jintao3652-cell/FMS-UPDATE-MANAGER"
+GITHUB_RELEASE_LATEST_API = "https://api.github.com/repos/{repo}/releases/latest"
+GITHUB_RELEASE_LIST_API = "https://api.github.com/repos/{repo}/releases?per_page=1"
+GITHUB_TAG_LIST_API = "https://api.github.com/repos/{repo}/tags?per_page=1"
+GITHUB_API_TOKEN = os.getenv("FMS_GITHUB_TOKEN", "").strip()
 OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
     "fnx-aircraft-320": ("fenix",),
     "pmdg-aircraft-736": ("pmdg", "wasm", "navdata"),
@@ -222,6 +230,177 @@ def parse_iso_utc(raw: str) -> datetime:
         return datetime.fromisoformat(normalized)
     except Exception:
         return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _parse_version_numbers(raw: str) -> tuple[int, ...]:
+    text = str(raw or "").strip()
+    if not text:
+        return ()
+    text = text.lstrip("vV")
+    nums = re.findall(r"\d+", text)
+    if not nums:
+        return ()
+    try:
+        return tuple(int(item) for item in nums)
+    except Exception:
+        return ()
+
+
+def _is_newer_version(latest: str, current: str) -> bool:
+    latest_parts = _parse_version_numbers(latest)
+    current_parts = _parse_version_numbers(current)
+    if not latest_parts or not current_parts:
+        return False
+    width = max(len(latest_parts), len(current_parts))
+    left = latest_parts + (0,) * (width - len(latest_parts))
+    right = current_parts + (0,) * (width - len(current_parts))
+    return left > right
+
+
+def format_version_display(raw: str) -> str:
+    parts = _parse_version_numbers(raw)
+    if parts:
+        normalized = parts[:3] + (0,) * max(0, 3 - len(parts[:3]))
+        return ".".join(str(item) for item in normalized)
+    text = str(raw or "").strip().lstrip("vV")
+    return text or "未知版本"
+
+
+def normalize_github_repo(raw_repo: str) -> str:
+    repo = str(raw_repo or "").strip().strip("/")
+    parts = [part.strip() for part in repo.split("/") if part.strip()]
+    if len(parts) >= 2:
+        return f"{parts[0]}/{parts[1]}"
+    return GITHUB_RELEASE_REPO
+
+
+def github_api_json(url: str) -> tuple[int, Any]:
+    headers = {
+        "User-Agent": f"{APP_NAME}/{APP_VERSION}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if GITHUB_API_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_API_TOKEN}"
+    req = Request(url, headers=headers)
+    try:
+        with urlopen(req, timeout=8) as resp:
+            status = int(getattr(resp, "status", 200) or 200)
+            payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            return status, payload
+    except HTTPError as exc:
+        status = int(getattr(exc, "code", 0) or 0)
+        try:
+            payload = json.loads(exc.read().decode("utf-8", errors="ignore"))
+        except Exception:
+            payload = {"message": str(exc)}
+        return status, payload
+    except URLError as exc:
+        reason = getattr(exc, "reason", None)
+        return 0, {"message": str(reason or exc)}
+    except TimeoutError as exc:
+        return 0, {"message": str(exc)}
+    except Exception as exc:
+        return 0, {"message": str(exc)}
+
+
+def fetch_latest_github_release_atom(repo: str) -> dict:
+    normalized_repo = normalize_github_repo(repo)
+    atom_url = f"https://github.com/{normalized_repo}/releases.atom"
+    req = Request(
+        atom_url,
+        headers={
+            "User-Agent": f"{APP_NAME}/{APP_VERSION}",
+            "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    with urlopen(req, timeout=8) as resp:
+        xml_text = resp.read().decode("utf-8", errors="ignore")
+    root = ET.fromstring(xml_text)
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    entry = root.find("atom:entry", ns)
+    if entry is None:
+        raise ValueError("github releases atom empty")
+
+    title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
+    link = ""
+    for link_node in entry.findall("atom:link", ns):
+        href = str(link_node.attrib.get("href", "")).strip()
+        rel = str(link_node.attrib.get("rel", "alternate")).strip().lower()
+        if href and rel in {"alternate", ""}:
+            link = href
+            break
+    if not link:
+        source_id = (entry.findtext("atom:id", default="", namespaces=ns) or "").strip()
+        if source_id.startswith("tag:github.com,2008:https://github.com/"):
+            link = source_id.replace("tag:github.com,2008:", "", 1)
+
+    tag_name = ""
+    if "/releases/tag/" in link:
+        tag_name = unquote(link.rsplit("/releases/tag/", 1)[-1].split("?", 1)[0].strip())
+    if not tag_name:
+        tag_name = title
+    if not tag_name:
+        raise ValueError("github releases atom has no tag")
+
+    return {
+        "tag_name": tag_name,
+        "name": title or tag_name,
+        "html_url": link or f"https://github.com/{normalized_repo}/releases",
+        "_repo": normalized_repo,
+    }
+
+
+def fetch_latest_github_release(repo: str) -> dict:
+    normalized_repo = normalize_github_repo(repo)
+    latest_url = GITHUB_RELEASE_LATEST_API.format(repo=normalized_repo)
+    status, payload = github_api_json(latest_url)
+    if status == 200 and isinstance(payload, dict):
+        payload.setdefault("tag_name", "")
+        payload.setdefault("name", "")
+        payload.setdefault("html_url", f"https://github.com/{normalized_repo}/releases/latest")
+        payload["_repo"] = normalized_repo
+        return payload
+
+    # Some repositories have no published release. Fallback to release list.
+    release_list_url = GITHUB_RELEASE_LIST_API.format(repo=normalized_repo)
+    status, payload = github_api_json(release_list_url)
+    if status == 200 and isinstance(payload, list) and payload:
+        first = payload[0] if isinstance(payload[0], dict) else {}
+        if isinstance(first, dict):
+            first.setdefault("tag_name", "")
+            first.setdefault("name", "")
+            first.setdefault("html_url", f"https://github.com/{normalized_repo}/releases")
+            first["_repo"] = normalized_repo
+            return first
+
+    # Final fallback: use latest tag as update source.
+    tags_url = GITHUB_TAG_LIST_API.format(repo=normalized_repo)
+    status, payload = github_api_json(tags_url)
+    if status == 200 and isinstance(payload, list) and payload:
+        first = payload[0] if isinstance(payload[0], dict) else {}
+        tag_name = str(first.get("name", "")).strip() if isinstance(first, dict) else ""
+        if tag_name:
+            return {
+                "tag_name": tag_name,
+                "name": tag_name,
+                "html_url": f"https://github.com/{normalized_repo}/tags",
+                "_repo": normalized_repo,
+            }
+
+    # GitHub API may hit shared-IP rate limits. Fallback to public Atom feed.
+    atom_error = ""
+    try:
+        return fetch_latest_github_release_atom(normalized_repo)
+    except Exception as exc:
+        atom_error = str(exc)
+
+    message = payload.get("message", "github api unavailable") if isinstance(payload, dict) else "github api unavailable"
+    if atom_error:
+        raise ValueError(
+            f"github releases not available for {normalized_repo}: {message}; atom fallback failed: {atom_error}"
+        )
+    raise ValueError(f"github releases not available for {normalized_repo}: {message}")
 
 
 def load_cycle_json_payload(json_path: Path):
@@ -1170,14 +1349,19 @@ def copy_payload_dir_to_target(
     install_root.mkdir(parents=True, exist_ok=True)
 
     copied_files = 0
+
+    def copy_with_count(src, dst, *, follow_symlinks=True):
+        nonlocal copied_files
+        result = shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
+        copied_files += 1
+        return result
+
     for child in payload_dir.iterdir():
         dst = install_root / child.name
         if child.is_dir():
-            shutil.copytree(child, dst, dirs_exist_ok=True)
-            copied_files += sum(1 for p in child.rglob("*") if p.is_file())
+            shutil.copytree(child, dst, dirs_exist_ok=True, copy_function=copy_with_count)
         else:
-            shutil.copy2(child, dst)
-            copied_files += 1
+            copy_with_count(child, dst)
     return copied_files, install_root
 
 
@@ -1193,6 +1377,24 @@ def prepare_archive_payload(
 ) -> dict | None:
     if progress_callback is not None:
         progress_callback(f"开始解析压缩包: {archive_path.name}")
+    kind = _archive_kind(archive_path)
+    if kind == "zip":
+        if progress_callback is not None:
+            progress_callback("检测到压缩格式: zip")
+            progress_callback("正在读取 ZIP 内 cycle.json...")
+        payload = inspect_zip_cycle_payload(archive_path)
+        if not payload:
+            if progress_callback is not None:
+                progress_callback("未找到有效 cycle.json")
+            return None
+        payload["probe_root"] = ""
+        payload["payload_prefix"] = str(payload.get("payload_prefix", "")).strip()
+        if progress_callback is not None:
+            progress_callback(
+                f"解析成功: AIRAC {payload.get('airac', 'UNKNOWN')}, payload={payload.get('payload_prefix', '')}"
+            )
+        return payload
+
     probe_root = extract_archive_cycle_json_to_temp(archive_path, progress_callback=progress_callback)
     if progress_callback is not None:
         progress_callback("正在定位 cycle.json...")
@@ -2264,6 +2466,17 @@ def default_addons() -> list[dict]:
         {
             "name": "Aerosoft A340-600 Pro",
             "description": "Aerosoft Airbus A340-600 Pro",
+            "simulator": "MSFS 2024",
+            "platform": "Xbox/MS Store",
+            "target_path": "",
+            "package_name": "aerosoft-aircraft-a346-pro",
+            "navdata_subpath": r"work\FMSData",
+        }
+    )
+    addons.append(
+        {
+            "name": "Aerosoft A340-600 Pro",
+            "description": "Aerosoft Airbus A340-600 Pro",
             "simulator": "MSFS 2020",
             "platform": "Steam",
             "target_path": "",
@@ -2987,6 +3200,46 @@ def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
     return None
 
 
+def read_a346_builtin_cycle(addon: Addon, state: dict | None = None) -> tuple[str, str] | None:
+    if not is_a346_addon(addon):
+        return None
+
+    package_name = infer_package_name(addon)
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    for base in community_base_candidates(state, addon.simulator, addon.platform):
+        if not base:
+            continue
+        package_root = Path(base) / package_name
+        key = str(package_root).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(package_root)
+    if addon.simulator == "MSFS 2024" and addon.platform == "Xbox/MS Store":
+        package_root = Path(_expand(r"%APPDATA%\Microsoft Flight Simulator 2024\packages\Community")) / package_name
+        key = str(package_root).lower()
+        if key not in seen:
+            seen.add(key)
+            candidates.append(package_root)
+
+    for package_root in candidates:
+        default_data = package_root / "data" / "default data"
+        if not default_data.exists() or not default_data.is_dir():
+            continue
+
+        cycle_candidates: list[str] = []
+        for file_path in default_data.glob("ng_jeppesen_fwdfd_*.s3db"):
+            cycle = detect_airac(file_path.name)
+            if cycle != "UNKNOWN":
+                cycle_candidates.append(cycle)
+
+        if cycle_candidates:
+            cycle_candidates.sort(key=lambda value: int(value), reverse=True)
+            return cycle_candidates[0], str(default_data)
+    return None
+
+
 def addon_status(addon: Addon, api_cycle: str, state: dict | None = None) -> tuple[str, str, str, str]:
     target = resolve_target_dir(addon, state)
     if target and target.exists():
@@ -2995,6 +3248,9 @@ def addon_status(addon: Addon, api_cycle: str, state: dict | None = None) -> tup
     else:
         installed = "NONE"
         target_str = addon.target_path or ""
+        a346_builtin = read_a346_builtin_cycle(addon, state)
+        if a346_builtin is not None:
+            installed, target_str = a346_builtin
 
     if not target_str:
         status = "NOT INSTALLED"
@@ -3240,6 +3496,16 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     op_hide_button = ft.TextButton("返回")
     backup_power_login_valid = False
     one_click_install_filter_button: ft.Button | None = None
+    startup_update_check_skip = False
+    startup_update_release_url = ""
+    startup_update_overlay_container = ft.Container(visible=False)
+    startup_update_title = ft.Text("启动检查更新", size=fs(22), weight=ft.FontWeight.BOLD, color=colors["text_title"])
+    startup_update_status = ft.Text("准备检查 GitHub Releases...", size=fs(14), color=colors["text_sub"])
+    startup_update_detail = ft.Text("", size=fs(12), color=colors["text_meta"], selectable=True)
+    startup_update_countdown = ft.Text("", size=fs(12), color=colors["text_meta"])
+    startup_update_skip_btn: ft.Button | None = None
+    startup_update_download_btn: ft.Button | None = None
+    startup_update_continue_btn: ft.Button | None = None
 
 
     active_sims = enabled_simulators(state)
@@ -3693,6 +3959,163 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             setattr(snack_bar, "open", True)
             page.update()
 
+    def expand_window_for_update_notice() -> None:
+        try:
+            page.window.width = max(1360, int(getattr(page.window, "width", 1260) or 1260))
+            page.window.height = max(780, int(getattr(page.window, "height", 700) or 700))
+            page.window.min_width = max(1200, int(getattr(page.window, "min_width", 1100) or 1100))
+            page.window.min_height = max(740, int(getattr(page.window, "min_height", 700) or 700))
+        except Exception:
+            setattr(page, "window_width", 1360)
+            setattr(page, "window_height", 780)
+            setattr(page, "window_min_width", 1200)
+            setattr(page, "window_min_height", 740)
+        page.update()
+
+    def close_startup_update_overlay() -> None:
+        startup_update_overlay_container.visible = False
+        update_controls(startup_update_overlay_container)
+
+    def set_startup_update_overlay(
+        status_text: str,
+        detail_text: str = "",
+        *,
+        countdown_text: str = "",
+        show_skip: bool = False,
+        show_download: bool = False,
+        show_continue: bool = False,
+    ) -> None:
+        startup_update_status.value = status_text
+        startup_update_detail.value = detail_text
+        startup_update_countdown.value = countdown_text
+        if startup_update_skip_btn is not None:
+            startup_update_skip_btn.visible = show_skip
+            startup_update_skip_btn.disabled = False
+        if startup_update_download_btn is not None:
+            startup_update_download_btn.visible = show_download
+            startup_update_download_btn.disabled = not bool(startup_update_release_url)
+        if startup_update_continue_btn is not None:
+            startup_update_continue_btn.visible = show_continue
+            startup_update_continue_btn.disabled = False
+        startup_update_overlay_container.visible = True
+        update_controls(startup_update_overlay_container)
+
+    def open_external_url(url: str) -> None:
+        raw = str(url or "").strip()
+        if not raw:
+            return
+        try:
+            webbrowser.open(raw, new=2)
+            return
+        except Exception:
+            pass
+        try:
+            subprocess.Popen(["explorer.exe", raw], shell=False)
+        except Exception:
+            pass
+
+    def on_startup_update_skip(_e=None) -> None:
+        nonlocal startup_update_check_skip
+        startup_update_check_skip = True
+        close_startup_update_overlay()
+        log("启动更新检查: 用户点击跳过。")
+
+    def on_startup_update_download(_e=None) -> None:
+        nonlocal startup_update_check_skip
+        if startup_update_release_url:
+            open_external_url(startup_update_release_url)
+        startup_update_check_skip = True
+        close_startup_update_overlay()
+        log(f"启动更新检查: 打开发布页 {startup_update_release_url}")
+
+    def on_startup_update_continue(_e=None) -> None:
+        nonlocal startup_update_check_skip
+        startup_update_check_skip = True
+        close_startup_update_overlay()
+        log("启动更新检查: 用户继续进入主界面。")
+
+    async def run_startup_update_check() -> None:
+        nonlocal startup_update_check_skip, startup_update_release_url
+        startup_update_check_skip = False
+        repo = normalize_github_repo(GITHUB_RELEASE_REPO)
+        startup_update_release_url = f"https://github.com/{repo}/releases/latest"
+        set_startup_update_overlay(
+            "正在检查更新...",
+            f"正在访问 GitHub Releases: {repo}",
+            show_skip=True,
+            show_download=False,
+            show_continue=False,
+        )
+
+        check_task = asyncio.create_task(asyncio.to_thread(fetch_latest_github_release, repo))
+        while not check_task.done():
+            if startup_update_check_skip:
+                return
+            await asyncio.sleep(0.12)
+
+        if startup_update_check_skip:
+            return
+
+        try:
+            release = check_task.result()
+        except Exception as exc:
+            log(f"GitHub 更新检查失败: {exc}")
+            expand_window_for_update_notice()
+            failure_message = "与github通信失败，请手动检查更新或更换网络后重试。"
+            for remain in range(3, 0, -1):
+                if startup_update_check_skip:
+                    return
+                set_startup_update_overlay(
+                    "更新检查失败",
+                    failure_message,
+                    countdown_text=f"{remain} 秒后自动进入主界面",
+                    show_skip=False,
+                    show_download=False,
+                    show_continue=False,
+                )
+                await asyncio.sleep(1)
+            close_startup_update_overlay()
+            return
+
+        latest_tag = str(release.get("tag_name", "")).strip()
+        latest_name = str(release.get("name", "")).strip()
+        startup_update_release_url = str(release.get("html_url", "")).strip() or startup_update_release_url
+        current_version_label = format_version_display(APP_VERSION)
+        latest_version_label = format_version_display(latest_tag or latest_name)
+        newest = _is_newer_version(latest_tag or latest_name, APP_VERSION)
+
+        if newest:
+            detail = (
+                f"当前版本: {current_version_label}\n"
+                f"最新版本: {latest_version_label}\n"
+                f"发布页: {startup_update_release_url}"
+            )
+            for remain in range(8, 0, -1):
+                if startup_update_check_skip:
+                    return
+                set_startup_update_overlay(
+                    "发现新版本，可从 GitHub Releases 更新。",
+                    detail,
+                    countdown_text=f"{remain} 秒后自动进入主界面",
+                    show_skip=False,
+                    show_download=True,
+                    show_continue=True,
+                )
+                await asyncio.sleep(1)
+            close_startup_update_overlay()
+            return
+
+        set_startup_update_overlay(
+            "已是最新版本。",
+            f"当前版本: {current_version_label}",
+            countdown_text="即将进入主界面...",
+            show_skip=False,
+            show_download=False,
+            show_continue=False,
+        )
+        await asyncio.sleep(0.8)
+        close_startup_update_overlay()
+
     def show_operation_dialog(title: str, status: str, detail: str = "") -> None:
         nonlocal op_dialog, op_dialog_suppressed
         op_dialog_title.value = title
@@ -3931,17 +4354,31 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             progress_callback(f"开始安装: {addon.name}")
         extracted_root: Path | None = None
         try:
-            if progress_callback is not None:
-                progress_callback("正在解压压缩包主体文件...")
-            extracted_root = extract_archive_to_temp(archive_path, progress_callback=progress_callback)
-            if progress_callback is not None:
-                progress_callback("正在定位安装载荷...")
-            archive_payload = inspect_extracted_cycle_payload(extracted_root)
-            if not archive_payload:
-                raise ValueError("压缩包中未找到可用 cycle.json，无法安装")
-            payload_dir = Path(str(archive_payload.get("payload_dir", "")).strip())
-            if not payload_dir.exists() or not payload_dir.is_dir():
-                raise ValueError(f"无效安装载荷目录: {payload_dir}")
+            archive_kind = _archive_kind(archive_path)
+            payload_airac = "UNKNOWN"
+            payload_prefix = ""
+            payload_dir: Path | None = None
+            if archive_kind == "zip":
+                if progress_callback is not None:
+                    progress_callback("正在分析 ZIP 安装载荷...")
+                archive_payload = inspect_zip_cycle_payload(archive_path)
+                if not archive_payload:
+                    raise ValueError("压缩包中未找到可用 cycle.json，无法安装")
+                payload_prefix = str(archive_payload.get("payload_prefix", "")).strip()
+                payload_airac = detect_airac(str(archive_payload.get("airac", "UNKNOWN")))
+            else:
+                if progress_callback is not None:
+                    progress_callback("正在解压压缩包主体文件...")
+                extracted_root = extract_archive_to_temp(archive_path, progress_callback=progress_callback)
+                if progress_callback is not None:
+                    progress_callback("正在定位安装载荷...")
+                archive_payload = inspect_extracted_cycle_payload(extracted_root)
+                if not archive_payload:
+                    raise ValueError("压缩包中未找到可用 cycle.json，无法安装")
+                payload_dir = Path(str(archive_payload.get("payload_dir", "")).strip())
+                if not payload_dir.exists() or not payload_dir.is_dir():
+                    raise ValueError(f"无效安装载荷目录: {payload_dir}")
+                payload_airac = detect_airac(str(archive_payload.get("airac", "UNKNOWN")))
 
             install_base = target
             if is_a346_addon(addon) and re.fullmatch(r"cycle[_-]?[0-9]{4}", target.name, re.IGNORECASE):
@@ -3972,19 +4409,30 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 if progress_callback is not None:
                     progress_callback("创建安装目录...")
 
+            effective_airac = archive_airac if archive_airac != "UNKNOWN" else payload_airac
             if progress_callback is not None:
                 progress_callback("复制新导航数据文件...")
-            extracted_files, install_root = copy_payload_dir_to_target(
-                addon=addon,
-                payload_dir=payload_dir,
-                install_base=install_base,
-                airac=archive_airac,
-            )
+            if archive_kind == "zip":
+                extracted_files, install_root = extract_zip_payload_to_target(
+                    addon=addon,
+                    zip_path=archive_path,
+                    install_base=install_base,
+                    payload_prefix=payload_prefix,
+                    airac=effective_airac,
+                )
+            else:
+                if payload_dir is None:
+                    raise ValueError("安装载荷目录无效。")
+                extracted_files, install_root = copy_payload_dir_to_target(
+                    addon=addon,
+                    payload_dir=payload_dir,
+                    install_base=install_base,
+                    airac=effective_airac,
+                )
             if extracted_files <= 0:
                 raise ValueError("No files were extracted from archive payload.")
 
-            payload_airac = detect_airac(str(archive_payload.get("airac", "UNKNOWN")))
-            airac = archive_airac if archive_airac != "UNKNOWN" else payload_airac
+            airac = effective_airac
             if airac == "UNKNOWN":
                 airac = read_cycle_from_dir(install_base)
             (install_base / "airac.txt").write_text(f"AIRAC {airac}\n", encoding="utf-8")
@@ -5134,6 +5582,21 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 width=220,
             )
             err = ft.Text("", size=fs(12), color="#b83d4b")
+            current_version_text = ft.Text(
+                f"当前版本: {format_version_display(APP_VERSION)}",
+                size=fs(12),
+                color=colors["text_sub"],
+                selectable=True,
+            )
+            update_check_status = ft.Text(
+                "更新状态: 未检查",
+                size=fs(12),
+                color=colors["text_meta"],
+                selectable=True,
+            )
+            check_update_btn = ft.Button("检查更新")
+            open_release_btn = ft.TextButton("打开发布页", visible=False)
+            latest_release_url = f"https://github.com/{normalize_github_repo(GITHUB_RELEASE_REPO)}/releases"
             dlg: ft.Control | None = None
             browse20_btn = ft.Button("浏览")
             browse24_btn = ft.Button("浏览")
@@ -5163,6 +5626,60 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
             def close_dialog(_evt=None) -> None:
                 close_custom_modal()
+
+            def open_release_page(_evt=None) -> None:
+                if latest_release_url:
+                    open_external_url(latest_release_url)
+
+            async def run_manual_update_check() -> None:
+                nonlocal latest_release_url
+                repo = normalize_github_repo(GITHUB_RELEASE_REPO)
+                update_check_status.value = f"更新状态: 正在检查 ({repo})..."
+                open_release_btn.visible = False
+                if not try_control_update(dlg):
+                    page.update()
+                try:
+                    release = await asyncio.to_thread(fetch_latest_github_release, repo)
+                except Exception as exc:
+                    latest_release_url = f"https://github.com/{repo}/releases"
+                    update_check_status.value = (
+                        "更新状态: 与github通信失败，请手动检查更新或更换网络后重试。"
+                    )
+                    log(f"设置页检查更新失败: {exc}")
+                    open_release_btn.visible = True
+                    if not try_control_update(dlg):
+                        page.update()
+                    return
+
+                latest_tag = str(release.get("tag_name", "")).strip()
+                latest_name = str(release.get("name", "")).strip()
+                latest_display = format_version_display(latest_tag or latest_name)
+                latest_release_url = str(release.get("html_url", "")).strip() or f"https://github.com/{repo}/releases"
+                is_new = _is_newer_version(latest_display, APP_VERSION)
+                if is_new:
+                    update_check_status.value = (
+                        f"更新状态: 发现新版本 {latest_display}（当前 {format_version_display(APP_VERSION)}）"
+                    )
+                else:
+                    update_check_status.value = (
+                        f"更新状态: 已是最新版本（当前 {format_version_display(APP_VERSION)}，远端 {latest_display}）"
+                    )
+                open_release_btn.visible = True
+                if not try_control_update(dlg):
+                    page.update()
+
+            def check_update_click(_evt=None) -> None:
+                if is_button_busy(check_update_btn):
+                    return
+                set_button_busy(check_update_btn, True, "检查中...")
+
+                async def runner() -> None:
+                    try:
+                        await run_manual_update_check()
+                    finally:
+                        set_button_busy(check_update_btn, False)
+
+                page.run_task(runner)
 
             def browse_fs20(_evt) -> None:
                 async def runner() -> None:
@@ -5220,6 +5737,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             browse24_btn.on_click = browse_fs24
             browse24_extra_btn.on_click = browse_fs24_extra
             browse_cache_btn.on_click = browse_cache_dir
+            check_update_btn.on_click = check_update_click
+            open_release_btn.on_click = open_release_page
 
             def refresh_field_status() -> None:
                 fs20_field.disabled = not bool(has20_check.value)
@@ -5307,6 +5826,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 "设置",
                 [
                     ft.Text(f"当前平台: {platform}", size=fs(12), color=colors["text_sub"]),
+                    ft.Row(spacing=10, controls=[current_version_text, check_update_btn, open_release_btn]),
+                    update_check_status,
                     ft.Row(spacing=16, controls=[has20_check, has24_check]),
                     ft.Row(spacing=8, controls=[fs20_field, browse20_btn]),
                     ft.Row(spacing=8, controls=[fs24_field, browse24_btn]),
@@ -5488,10 +6009,33 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             )
             result_text = ft.Text("", size=fs(12), color=colors["text_sub"], selectable=True)
             err_text = ft.Text("", size=fs(12), color="#b83d4b")
+            input_notice_text = ft.Text("", size=fs(11), color=colors["text_meta"])
             dlg: ft.Control | None = None
             login_inflight = False
             login_btn: ft.Button
             save_btn: ft.TextButton
+
+            def keep_ascii_printable(text: str) -> str:
+                return "".join(ch for ch in str(text or "") if 32 <= ord(ch) <= 126)
+
+            def apply_english_only(field: ft.TextField, field_name: str) -> None:
+                original = str(field.value or "")
+                filtered = keep_ascii_printable(original)
+                if original == filtered:
+                    return
+                field.value = filtered
+                input_notice_text.value = f"{field_name}仅支持英文字符，已自动过滤非英文输入。"
+                if not try_control_update(dlg):
+                    page.update()
+
+            def on_user_change(_evt=None) -> None:
+                apply_english_only(user_field, "账号")
+
+            def on_pass_change(_evt=None) -> None:
+                apply_english_only(pass_field, "密码")
+
+            user_field.on_change = on_user_change
+            pass_field.on_change = on_pass_change
 
             def set_auth_dialog_busy(busy: bool) -> None:
                 login_btn.disabled = busy
@@ -5702,6 +6246,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 [
                     ft.Text("账号登录", size=fs(14), weight=ft.FontWeight.W_700, color=colors["text_title"]),
                     ft.Row(spacing=8, controls=[user_field, pass_field]),
+                    ft.Text("账号和密码仅支持英文字符（ASCII）。", size=fs(11), color=colors["text_sub"]),
+                    input_notice_text,
                     ft.Text(
                         "OpenList 会在后台自动登录并自动刷新 Token，无需用户手动登录。当前窗口只用于 DATA 域名登录。",
                         size=fs(11),
@@ -6449,6 +6995,63 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         ),
     )
 
+    startup_update_skip_btn = ft.Button(
+        "跳过",
+        icon=ft.Icons.SKIP_NEXT,
+        bgcolor=colors["panel_soft_bg"],
+        color=colors["text_meta"],
+        on_click=on_startup_update_skip,
+        visible=False,
+    )
+    startup_update_download_btn = ft.Button(
+        "前往更新",
+        icon=ft.Icons.SYSTEM_UPDATE_ALT,
+        bgcolor="#1a73e8",
+        color="#ffffff",
+        on_click=on_startup_update_download,
+        visible=False,
+    )
+    startup_update_continue_btn = ft.Button(
+        "继续进入",
+        icon=ft.Icons.ARROW_FORWARD,
+        bgcolor=colors["panel_soft_bg"],
+        color=colors["text_meta"],
+        on_click=on_startup_update_continue,
+        visible=False,
+    )
+
+    startup_update_overlay_container.content = ft.Container(
+        expand=True,
+        bgcolor="#0c1220d8",
+        alignment=ft.Alignment(0, 0),
+        content=ft.Container(
+            width=860,
+            border_radius=22,
+            bgcolor=colors["panel_bg"],
+            border=ft.Border.all(1, "#2f3c52"),
+            padding=18,
+            content=ft.Column(
+                tight=True,
+                spacing=12,
+                controls=[
+                    startup_update_title,
+                    startup_update_status,
+                    startup_update_detail,
+                    startup_update_countdown,
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.END,
+                        spacing=8,
+                        controls=[
+                            startup_update_skip_btn,
+                            startup_update_download_btn,
+                            startup_update_continue_btn,
+                        ],
+                    ),
+                ],
+            ),
+        ),
+    )
+
     install_force_button = ft.Button(
         "强制安装",
         icon=ft.Icons.WARNING_AMBER_ROUNDED,
@@ -6544,6 +7147,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 log_overlay_container,
                 install_overlay_container,
                 op_overlay_container,
+                startup_update_overlay_container,
             ],
         )
     )
@@ -6566,6 +7170,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 removed = int(cleanup_result.get("removed", 0))
                 days = int(cleanup_result.get("days", DEFAULT_CACHE_CLEANUP_DAYS))
                 log(f"缓存定期清理完成：清理周期 {days} 天，删除 {removed} 项过期缓存。")
+            await run_startup_update_check()
             await refresh_backup_power_login_validity(notify_invalid=False)
             await refresh_cycle_async(notify_fail=False)
             await rescan_and_rebuild_async(show_loading=False, notify_done=False)
