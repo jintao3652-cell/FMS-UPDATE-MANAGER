@@ -1,11 +1,7 @@
-from collections import defaultdict
+﻿from collections import defaultdict
 from datetime import datetime, timezone
-from email.message import EmailMessage
 from threading import Lock
 import re
-import secrets
-import smtplib
-import time
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -25,7 +21,6 @@ from .schemas import (
     LoginResponse,
     MeResponse,
     RegisterRequest,
-    SendEmailCodeRequest,
 )
 from .security import create_access_token, decode_access_token, hash_password, verify_password
 
@@ -45,9 +40,10 @@ _fail_bucket: dict[str, list[float]] = defaultdict(list)
 _fail_lock = Lock()
 MAX_FAIL = 8
 WINDOW_SECONDS = 300
+_register_attempt_bucket: dict[str, list[float]] = defaultdict(list)
+_register_success_bucket: dict[str, list[float]] = defaultdict(list)
+_register_lock = Lock()
 
-_email_code_store: dict[str, tuple[str, float]] = {}
-_email_code_lock = Lock()
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -83,6 +79,35 @@ def clear_fail(ip: str) -> None:
         _fail_bucket.pop(ip, None)
 
 
+def allow_register_from_ip(ip: str) -> None:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    attempt_window = max(1, int(settings.register_attempt_window_seconds))
+    attempt_limit = max(1, int(settings.register_attempt_limit))
+    success_window = max(1, int(settings.register_per_ip_window_seconds))
+    success_limit = max(1, int(settings.register_per_ip_limit))
+    with _register_lock:
+        _register_attempt_bucket[ip] = [ts for ts in _register_attempt_bucket[ip] if now_ts - ts <= attempt_window]
+        _register_success_bucket[ip] = [ts for ts in _register_success_bucket[ip] if now_ts - ts <= success_window]
+
+        if len(_register_success_bucket[ip]) >= success_limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too many registrations from this ip",
+            )
+        if len(_register_attempt_bucket[ip]) >= attempt_limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too many register attempts",
+            )
+        _register_attempt_bucket[ip].append(now_ts)
+
+
+def record_register_success(ip: str) -> None:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    with _register_lock:
+        _register_success_bucket[ip].append(now_ts)
+
+
 def parse_bearer(authorization: str | None) -> str:
     if not authorization:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing authorization header")
@@ -100,27 +125,6 @@ def normalize_email(email: str) -> str:
     if not value or not EMAIL_REGEX.fullmatch(value):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email")
     return value
-
-
-def send_email_code(email: str, code: str) -> None:
-    if not settings.smtp_host or not settings.smtp_user or not settings.smtp_password:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="smtp not configured")
-    sender = settings.smtp_sender or settings.smtp_user
-    msg = EmailMessage()
-    msg["Subject"] = "FMS 注册验证码"
-    msg["From"] = sender
-    msg["To"] = email
-    msg.set_content(f"你的验证码是：{code}\n有效期 {settings.email_code_ttl_seconds // 60} 分钟。")
-    if settings.smtp_use_ssl:
-        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=15) as s:
-            s.login(settings.smtp_user, settings.smtp_password)
-            s.send_message(msg)
-        return
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as s:
-        if settings.smtp_use_tls:
-            s.starttls()
-        s.login(settings.smtp_user, settings.smtp_password)
-        s.send_message(msg)
 
 
 def ensure_schema_compat() -> None:
@@ -194,26 +198,16 @@ def register_page():
 <style>body{font-family:Segoe UI;padding:24px;max-width:560px}input,button{width:100%;margin:6px 0;padding:10px}pre{background:#f5f5f5;padding:10px}</style>
 </head><body>
 <h2>用户注册</h2>
-<input id="email" placeholder="邮箱">
-<button onclick="sendCode()">发送验证码</button>
 <input id="username" placeholder="用户名">
 <input id="password" placeholder="密码" type="password">
-<input id="code" placeholder="邮箱验证码">
 <button onclick="registerUser()">注册</button>
 <pre id="out"></pre>
 <script>
 const out = document.getElementById('out');
-async function sendCode(){
-  const email=document.getElementById('email').value.trim();
-  const r=await fetch('/api/auth/send-email-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
-  out.textContent=await r.text();
-}
 async function registerUser(){
   const payload={
-    email:document.getElementById('email').value.trim(),
     username:document.getElementById('username').value.trim(),
-    password:document.getElementById('password').value,
-    code:document.getElementById('code').value.trim()
+    password:document.getElementById('password').value
   };
   const r=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   out.textContent=await r.text();
@@ -228,16 +222,16 @@ def admin_page():
 <!doctype html><html><head><meta charset="utf-8"><title>Admin</title>
 <style>body{font-family:Segoe UI;padding:24px;max-width:900px}input,button,select{margin:4px;padding:8px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px}pre{background:#f5f5f5;padding:10px}</style>
 </head><body>
-<h2>后台管理</h2>
-<p>先登录拿 token，再粘贴到下面。</p>
+<h2>鍚庡彴绠＄悊</h2>
+<p>鍏堢櫥褰曟嬁 token锛屽啀绮樿创鍒颁笅闈€?/p>
 <input id="token" placeholder="Bearer token" style="width:100%">
-<button onclick="loadUsers()">刷新用户列表</button>
-<h3>新增用户</h3>
-<input id="new_user" placeholder="用户名"><input id="new_email" placeholder="邮箱"><input id="new_pwd" placeholder="密码">
+<button onclick="loadUsers()">鍒锋柊鐢ㄦ埛鍒楄〃</button>
+<h3>鏂板鐢ㄦ埛</h3>
+<input id="new_user" placeholder="鐢ㄦ埛鍚?><input id="new_email" placeholder="閭"><input id="new_pwd" placeholder="瀵嗙爜">
 <select id="new_role"><option value="user">user</option><option value="admin">admin</option></select>
-<button onclick="createUser()">新增</button>
-<h3>用户列表</h3>
-<table id="tbl"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>角色</th><th>启用</th><th>操作</th></tr></thead><tbody></tbody></table>
+<button onclick="createUser()">鏂板</button>
+<h3>鐢ㄦ埛鍒楄〃</h3>
+<table id="tbl"><thead><tr><th>ID</th><th>鐢ㄦ埛鍚?/th><th>閭</th><th>瑙掕壊</th><th>鍚敤</th><th>鎿嶄綔</th></tr></thead><tbody></tbody></table>
 <pre id="out"></pre>
 <script>
 const out=document.getElementById('out');
@@ -249,7 +243,7 @@ async function loadUsers(){
   for(const u of j.users){
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${u.id}</td><td>${u.username}</td><td>${u.email||''}</td><td>${u.role}</td><td>${u.enabled}</td>
-    <td><button onclick="delUser(${u.id})">删除</button><button onclick="chgPwd(${u.id})">改密</button></td>`;
+    <td><button onclick="delUser(${u.id})">鍒犻櫎</button><button onclick="chgPwd(${u.id})">鏀瑰瘑</button></td>`;
     tb.appendChild(tr);
   }
 }
@@ -261,7 +255,7 @@ async function delUser(id){
   const r=await fetch('/api/admin/users/'+id,{method:'DELETE',headers:auth()}); out.textContent=await r.text(); await loadUsers();
 }
 async function chgPwd(id){
-  const password=prompt('输入新密码'); if(!password)return;
+  const password=prompt('杈撳叆鏂板瘑鐮?); if(!password)return;
   const r=await fetch('/api/admin/users/'+id+'/password',{method:'PATCH',headers:auth(),body:JSON.stringify({password})});
   out.textContent=await r.text();
 }
@@ -293,41 +287,18 @@ def login(body: LoginRequest, req: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/api/auth/send-email-code")
-def send_email_code_api(body: SendEmailCodeRequest, db: Session = Depends(get_db)):
-    email = normalize_email(body.email)
-    if db.scalar(select(User).where(User.email == email)):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
-    code = f"{secrets.randbelow(900000) + 100000}"
-    send_email_code(email, code)
-    with _email_code_lock:
-        _email_code_store[email] = (code, time.time() + settings.email_code_ttl_seconds)
-    return {"success": True, "message": "verification code sent"}
-
-
 @app.post("/api/auth/register")
-def register(body: RegisterRequest, db: Session = Depends(get_db)):
-    email = normalize_email(body.email)
+def register(body: RegisterRequest, req: Request, db: Session = Depends(get_db)):
+    ip = client_ip(req)
+    allow_register_from_ip(ip)
     username = body.username.strip()
     if not username:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid username")
-    with _email_code_lock:
-        entry = _email_code_store.get(email)
-    if not entry:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="code not sent")
-    expected_code, expire_ts = entry
-    if time.time() > expire_ts:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="code expired")
-    if body.code.strip() != expected_code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid code")
     if db.scalar(select(User).where(User.username == username)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="username already exists")
-    if db.scalar(select(User).where(User.email == email)):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
-    db.add(User(username=username, email=email, password_hash=hash_password(body.password), role="user", enabled=True))
+    db.add(User(username=username, email=None, password_hash=hash_password(body.password), role="user", enabled=True))
     db.commit()
-    with _email_code_lock:
-        _email_code_store.pop(email, None)
+    record_register_success(ip)
     return {"success": True, "message": "register ok"}
 
 

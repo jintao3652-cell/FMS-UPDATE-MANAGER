@@ -21,15 +21,9 @@ class MeResponse(BaseModel):
     user: dict
 
 
-class SendEmailCodeRequest(BaseModel):
-    email: str = Field(min_length=5, max_length=255)
-
-
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
-    email: str = Field(min_length=5, max_length=255)
-    code: str = Field(min_length=4, max_length=8)
 
 
 class AdminCreateUserRequest(BaseModel):

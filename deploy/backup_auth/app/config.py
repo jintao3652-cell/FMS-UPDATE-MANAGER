@@ -16,6 +16,10 @@ class Settings:
     smtp_use_ssl: bool = os.getenv("APP_SMTP_USE_SSL", "true").strip().lower() in {"1", "true", "yes", "on"}
     smtp_use_tls: bool = os.getenv("APP_SMTP_USE_TLS", "false").strip().lower() in {"1", "true", "yes", "on"}
     email_code_ttl_seconds: int = int(os.getenv("APP_EMAIL_CODE_TTL_SECONDS", "600"))
+    register_attempt_limit: int = int(os.getenv("APP_REGISTER_ATTEMPT_LIMIT", "10"))
+    register_attempt_window_seconds: int = int(os.getenv("APP_REGISTER_ATTEMPT_WINDOW_SECONDS", "300"))
+    register_per_ip_limit: int = int(os.getenv("APP_REGISTER_PER_IP_LIMIT", "1"))
+    register_per_ip_window_seconds: int = int(os.getenv("APP_REGISTER_PER_IP_WINDOW_SECONDS", "86400"))
 
 
 settings = Settings()
