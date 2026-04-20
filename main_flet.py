@@ -60,7 +60,7 @@ OPENLIST_ROOT_PATH = "/"
 OPENLIST_USERNAME = "navdata"
 OPENLIST_PASSWORD = "navdata"
 OPENLIST_TOKEN_CACHE = ""
-APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.1").strip() or "1.0.1"
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.2").strip() or "1.0.2"
 GITHUB_RELEASE_REPO = os.getenv("FMS_GITHUB_REPO", "jintao3652-cell/FMS-UPDATE-MANAGER").strip() or "jintao3652-cell/FMS-UPDATE-MANAGER"
 GITHUB_RELEASE_LATEST_API = "https://api.github.com/repos/{repo}/releases/latest"
 GITHUB_RELEASE_LIST_API = "https://api.github.com/repos/{repo}/releases?per_page=1"
@@ -3887,24 +3887,47 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         theme_buttons[option] = build_segment_button(theme_labels[option], lambda v=option: set_theme(v))
         theme_segment_row.controls.append(theme_buttons[option])
 
+    page_session_destroyed = False
+
+    def is_destroyed_session_error(exc: Exception) -> bool:
+        return "destroyed session" in str(exc or "").strip().lower()
+
+    def safe_page_update(*controls: ft.Control) -> bool:
+        nonlocal page_session_destroyed
+        if page_session_destroyed:
+            return False
+        try:
+            if controls:
+                page.update(*controls)
+            else:
+                page.update()
+            return True
+        except RuntimeError as exc:
+            if is_destroyed_session_error(exc):
+                page_session_destroyed = True
+                return False
+            raise
+        except Exception:
+            return False
+
     def try_control_update(control: ft.Control | None) -> bool:
         if control is None:
             return False
         try:
             control.update()
             return True
+        except RuntimeError as exc:
+            if is_destroyed_session_error(exc):
+                return False
+            return False
         except Exception:
             return False
 
     def update_controls(*controls: ft.Control | None) -> None:
         active_controls = [control for control in controls if control is not None]
-        if active_controls:
-            try:
-                page.update(*active_controls)
-                return
-            except Exception:
-                pass
-        page.update()
+        if active_controls and safe_page_update(*active_controls):
+            return
+        safe_page_update()
 
     def set_button_busy(button: ft.Button | None, busy: bool, busy_text: str | None = None) -> None:
         if button is None:
@@ -3957,8 +3980,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             if "dialog" in dir(page):
                 setattr(page, "dialog", control)
                 setattr(control, "open", True)
-                page.update()
-                return True
+                return safe_page_update()
         except Exception:
             pass
         try:
@@ -3967,8 +3989,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 if control not in overlay:
                     overlay.append(control)
                 setattr(control, "open", True)
-                page.update()
-                return True
+                return safe_page_update()
         except Exception:
             pass
         return False
@@ -3991,8 +4012,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         setattr(page, "dialog", None)
                     except Exception:
                         pass
-                    page.update()
-                    return True
+                    return safe_page_update()
         except Exception:
             pass
         try:
@@ -4002,14 +4022,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     overlay.remove(control)
                 else:
                     setattr(control, "open", False)
-                page.update()
-                return True
+                return safe_page_update()
         except Exception:
             pass
         try:
             setattr(control, "open", False)
-            page.update()
-            return True
+            return safe_page_update()
         except Exception:
             pass
         return False
@@ -4058,7 +4076,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             snack_bar = ft.SnackBar(ft.Text(msg), duration=1800)
             setattr(page, "snack_bar", snack_bar)
             setattr(snack_bar, "open", True)
-            page.update()
+            safe_page_update()
 
     def expand_window_for_update_notice() -> None:
         try:
@@ -4071,7 +4089,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             setattr(page, "window_height", 780)
             setattr(page, "window_min_width", 1200)
             setattr(page, "window_min_height", 740)
-        page.update()
+        safe_page_update()
 
     def close_startup_update_overlay() -> None:
         startup_update_overlay_container.visible = False

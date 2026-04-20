@@ -61,7 +61,7 @@ pyinstaller FMS_UPDATE_MANAGER.spec
 
 客户端支持通过环境变量覆盖更新源配置：
 
-- `FMS_APP_VERSION`：当前应用版本号（建议语义化版本，如 `1.0.1`）
+- `FMS_APP_VERSION`：当前应用版本号（建议语义化版本，如 `1.0.2`）
 - `FMS_GITHUB_REPO`：更新仓库（格式：`owner/repo`）
 - `FMS_GITHUB_TOKEN`：可选，GitHub API Token（用于提高 API 限额）
 
