@@ -8,7 +8,17 @@
 - **`auth_api` 不再向宿主机暴露 17306 端口**：仅在 Docker 内部网络监听，公网攻击面进一步收敛。
 - **简化配置**：`APP_REGISTER_PUBLIC_AUTH_URL` 默认留空即可正常工作（旧版本必须填写公网可达 URL，否则前端会请求到 `register_ui` 自身导致 `{"detail":"Not Found"}`）。
 - 修复 `register_ui` 前端 fetch URL 中误用反斜杠（`'\api\auth\register'`）触发 Python 字符串转义、导致请求路径异常的隐患（已在源码中以正斜杠重写）。
-- 文档更新：`服务器部署教程.md`、`deploy/README.md` 同步说明新架构、Cloudflare Turnstile hostname 白名单与本地测试密钥。
+
+### 注册流程安全加固
+
+- **Turnstile token 服务端去重**：`verify_turnstile` 通过 Cloudflare 校验后会把 token 记入内存（10 分钟 TTL），同一 token 二次提交直接返回 400 `turnstile token already used`，杜绝前端 reset 失败时的 token 复用。
+- **验证码发送同 IP 60 秒冷却**：同一来源 IP 在 60 秒内只允许发送一次验证码，超过返回 429 并提示剩余等待秒数。
+- **验证码发送同邮箱按 `per_email_window_seconds` 限流**（默认 60 秒，可在 SMTP 配置中调整），防止针对单个邮箱的轰炸。
+- **前端在每次提交后自动 `turnstile.reset()`**，并在 token 为空时直接提示用户先完成人机验证，避免无意义请求。
+
+### 文档
+
+- `服务器部署教程.md`、`deploy/README.md`、`README.md` 同步说明新架构、Cloudflare Turnstile hostname 白名单与本地测试密钥。
 
 ### 升级提示
 

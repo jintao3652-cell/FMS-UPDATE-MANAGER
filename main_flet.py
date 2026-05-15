@@ -26,6 +26,163 @@ from urllib.request import Request, urlopen
 
 import flet as ft
 
+import archive as archive_mod
+import catalog as catalog_mod
+import maintenance as maintenance_mod
+import network as network_mod
+import openlist as openlist_mod
+import state as state_mod
+import targets as targets_mod
+import utils as utils_mod
+
+from archive import (
+    COMMON_ARCHIVE_SUFFIXES,
+    _archive_kind,
+    _detect_embedded_archive_in_sfx_exe,
+    _extract_with_system_tar_command,
+    extract_archive_cycle_json_to_temp,
+    extract_archive_to_temp,
+    extract_airac_from_value,
+    inspect_extracted_cycle_payload,
+    inspect_zip_cycle_payload,
+    is_supported_archive_file,
+    load_cycle_json_payload,
+    normalize_zip_member,
+    prepare_archive_payload,
+    read_cycle_from_payload,
+    read_cycle_json,
+    read_cycle_json_name,
+)
+from openlist import (
+    BACKUP_POWER_LOGIN_URL,
+    BACKUP_POWER_ME_URL,
+    BACKUP_POWER_NAVDATA_DOWNLOAD_URL,
+    BACKUP_POWER_SERVER_BASE,
+    OPENLIST_BASE_URL,
+    OPENLIST_GET_URL,
+    OPENLIST_LIST_URL,
+    OPENLIST_LOGIN_URL,
+    OPENLIST_ROOT_PATH,
+    OPENLIST_TOKEN_CACHE,
+    OPENLIST_USERNAME,
+    OPENLIST_PASSWORD,
+    download_openlist_archive_for_addon,
+    find_openlist_cycle_folder,
+    find_openlist_cycle_msfs_folder,
+    get_openlist_token,
+    is_openlist_token_error,
+    list_openlist_cycle_msfs_items,
+    normalize_backup_power_download_dir,
+    normalize_backup_power_login_url,
+    openlist_cycle_msfs_path,
+    openlist_cycle_path,
+    openlist_get_file_meta_auto_request,
+    openlist_get_file_meta_request,
+    openlist_list_dir_auto_request,
+    openlist_list_dir_request,
+    openlist_login_request,
+    select_openlist_archive_for_addon,
+    backup_power_login_request,
+    backup_power_me_request,
+)
+from state import (
+    APP_EXECUTABLE_NAME,
+    APP_NAME,
+    APP_VERSION,
+    BACKUP_DIR,
+    CACHE_CLEANUP_DAY_OPTIONS,
+    DEFAULT_ADDON_FAMILIES,
+    DEFAULT_BATCH_DOWNLOAD_WORKERS,
+    DEFAULT_CACHE_CLEANUP_DAYS,
+    DEFAULT_SIM_PLATFORM_VARIANTS,
+    Addon,
+    LOCAL_DIR,
+    MSFS_VERSIONS,
+    PLATFORMS,
+    ROAMING_DIR,
+    STATE_FILE,
+    THEME_DARK,
+    THEME_LIGHT,
+    community_key,
+    default_addons,
+    load_state,
+    normalize_batch_download_workers,
+    normalize_cache_cleanup_days,
+    save_state,
+    to_addon,
+)
+from network import (
+    GITHUB_API_TOKEN,
+    GITHUB_RELEASE_LATEST_API,
+    GITHUB_RELEASE_LIST_API,
+    GITHUB_RELEASE_REPO,
+    GITHUB_TAG_LIST_API,
+    fetch_current_cycle,
+    fetch_latest_github_release,
+    fetch_latest_github_release_atom,
+    github_api_json,
+    normalize_github_repo,
+)
+from targets import (
+    addon_search_tokens,
+    cycle_name_is_generic_for_addon,
+    cycle_name_matches_addon,
+    folder_name_matches_addon_signature,
+    infer_package_name,
+    is_ifly_737max8_addon,
+    is_pmdg_737_addon,
+    path_matches_addon_signature,
+    text_matches_addon_signature,
+)
+from catalog import (
+    addon_key as catalog_addon_key,
+    addon_prefers_community,
+    addon_status as catalog_addon_status,
+    auto_detect_cycle_json_target,
+    community_base_candidates,
+    compute_filtered_addon_entries as catalog_compute_filtered_addon_entries,
+    default_wasm_scan_bases,
+    fixed_relative_path,
+    find_nested_cycle_dir,
+    fslabs_navdata_path,
+    is_fenix_addon,
+    is_fslabs_addon,
+    matches_filter,
+    read_a346_builtin_cycle,
+    resolve_target_dir as catalog_resolve_target_dir,
+    resolve_wasm_target_by_folder_name as catalog_resolve_wasm_target_by_folder_name,
+    status_badge_style,
+    status_dot_color,
+)
+from utils import (
+    CYCLES_API_URL,
+    LEGACY_LOG_FILE,
+    LOG_DIR,
+    append_log_file,
+    current_log_file,
+    detect_airac,
+    format_version_display,
+    fs,
+    get_colors,
+    human_datetime,
+    human_time,
+    parse_iso_utc,
+    read_log_lines,
+    _ensure_installer_not_running,
+    _is_newer_version,
+)
+from maintenance import (
+    cleanup_backup_power_download_cache,
+    cleanup_stale_cache_entries,
+    default_backup_power_download_dir,
+    default_batch_download_cache_dir,
+    ensure_backup_power_download_dir,
+    normalize_cache_cleanup_days,
+    normalize_cache_root_dir,
+    resolve_cache_root_dir,
+    resolve_existing_backup_power_download_dir,
+)
+
 ft.context.disable_auto_update()
 
 APP_NAME = "FMS UPDATE MANAGER"
@@ -48,7 +205,7 @@ LOG_DIR = ROAMING_DIR / "logs"
 EXTRACTED_DIR = LOCAL_DIR / "extracted"
 BACKUP_DIR = LOCAL_DIR / "backups"
 CYCLES_API_URL = "https://fmsdata.api.navigraph.com/v3/cycles"
-BACKUP_POWER_SERVER_BASE = "http://data.cnrpg.top:17306"
+BACKUP_POWER_SERVER_BASE = "http://fms.cnrpg.top:3090"
 BACKUP_POWER_LOGIN_URL = f"{BACKUP_POWER_SERVER_BASE}/api/auth/login"
 BACKUP_POWER_NAVDATA_DOWNLOAD_URL = f"{BACKUP_POWER_SERVER_BASE}/api/navdata/download"
 BACKUP_POWER_ME_URL = f"{BACKUP_POWER_SERVER_BASE}/api/me"
@@ -60,7 +217,7 @@ OPENLIST_ROOT_PATH = "/"
 OPENLIST_USERNAME = "navdata"
 OPENLIST_PASSWORD = "navdata"
 OPENLIST_TOKEN_CACHE = ""
-APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.2").strip() or "1.0.2"
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.5").strip() or "1.0.5"
 GITHUB_RELEASE_REPO = os.getenv("FMS_GITHUB_REPO", "jintao3652-cell/FMS-UPDATE-MANAGER").strip() or "jintao3652-cell/FMS-UPDATE-MANAGER"
 GITHUB_RELEASE_LATEST_API = "https://api.github.com/repos/{repo}/releases/latest"
 GITHUB_RELEASE_LIST_API = "https://api.github.com/repos/{repo}/releases?per_page=1"
@@ -135,25 +292,6 @@ DEFAULT_ADDON_FAMILIES: list[tuple[str, str, str, str]] = [
     ("FYCYC C919", "FYCYC C919", "fycyc-aircraft-c919x", ""),
     ("iFly 737 MAX8", "iFly 737 MAX series", "ifly-aircraft-737max8", r"Data\navdata\Permanent"),
 ]
-
-
-@dataclass
-class Addon:
-    name: str
-    description: str
-    simulator: str
-    platform: str
-    target_path: str = ""
-    package_name: str = ""
-    navdata_subpath: str = ""
-
-
-def human_time() -> str:
-    return datetime.now().strftime("%H:%M:%S")
-
-
-def human_datetime() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _startup_subprocess_kwargs() -> dict[str, Any]:
@@ -548,6 +686,52 @@ def is_a346_addon(addon: Addon) -> bool:
     package_name = addon.package_name.strip().lower()
     addon_name = addon.name.strip().lower()
     return package_name == "aerosoft-aircraft-a346-pro" or "a340-600" in addon_name
+
+
+def is_pmdg_737_addon(addon: Addon) -> bool:
+    package = addon.package_name.strip().lower()
+    name = addon.name.strip().lower()
+    return package.startswith("pmdg-aircraft-73") or "pmdg 737" in name
+
+
+def is_ifly_737max8_addon(addon: Addon) -> bool:
+    package = addon.package_name.strip().lower()
+    name = addon.name.strip().lower()
+    if package == "ifly-aircraft-737max8":
+        return True
+    return "ifly" in name and ("737max8" in name or "737 max" in name or "max8" in name)
+
+
+def is_inibuilds_msfs2024_a340_addon(addon: Addon) -> bool:
+    return addon.simulator == "MSFS 2024" and addon.package_name.strip().lower() == "inibuilds-aircraft-a340"
+
+
+def _is_a343_text(hay: str, compact: str) -> bool:
+    return "a340-300" in hay or "a340300" in compact or "a343" in compact
+
+
+def _is_a346_text(hay: str, compact: str) -> bool:
+    return "a340-600" in hay or "a340600" in compact or "a346" in compact
+
+
+def _is_inibuilds_a340_text(hay: str, compact: str) -> bool:
+    return "a340" in compact or _is_a343_text(hay, compact)
+
+
+def _addon_from_dict(item: dict) -> Addon:
+    return Addon(
+        name=str(item.get("name", "")).strip(),
+        description=str(item.get("description", "")).strip(),
+        simulator=str(item.get("simulator", "")).strip(),
+        platform=str(item.get("platform", "")).strip(),
+        target_path=str(item.get("target_path", "")).strip(),
+        package_name=str(item.get("package_name", "")).strip(),
+        navdata_subpath=str(item.get("navdata_subpath", "")).strip(),
+    )
+
+
+def _normalized_path_parts(path: Path) -> list[str]:
+    return [_norm_token(part) for part in path.parts if _norm_token(part)]
 
 
 def normalize_zip_member(member_name: str) -> str:
@@ -2022,10 +2206,17 @@ def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[d
             continue
         file_items.append((item, name, _norm_token(name)))
 
+    def is_excluded_name(name_norm: str) -> bool:
+        if package == "inibuilds-aircraft-a340" and addon.simulator == "MSFS 2024":
+            return any(token in name_norm for token in ("a340600", "a346"))
+        return False
+
     def find_by_rules(rules: list[tuple[str, ...]]) -> dict | None:
         for rule in rules:
             candidates: list[tuple[dict, str, str]] = []
             for tup in file_items:
+                if is_excluded_name(tup[2]):
+                    continue
                 if all(token in tup[2] for token in rule):
                     candidates.append(tup)
             if not candidates:
@@ -2056,6 +2247,8 @@ def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[d
         hard_rules = [("justflight", "rj"), ("rj", "wasm")]
     elif package == "tfdidesign-aircraft-md11":
         hard_rules = [("tfdi", "md11")]
+    elif package == "inibuilds-aircraft-a340" and addon.simulator == "MSFS 2024":
+        hard_rules = [("inibuilds", "a343"), ("inibuilds", "a340", "300"), ("inibuilds", "a340")]
     elif package in {"inibuilds-aircraft-a340", "inibuilds-aircraft-a350"}:
         hard_rules = [("inibuilds",)]
     elif package == "aerosoft-aircraft-a346-pro":
@@ -2074,6 +2267,8 @@ def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[d
     best_score = -1
     tie = False
     for item, name, name_norm in file_items:
+        if is_excluded_name(name_norm):
+            continue
         score = 0
         for hint in hints_norm:
             if hint and hint in name_norm:
@@ -2827,7 +3022,7 @@ def addon_requires_cycle_name_match(addon: Addon) -> bool:
     name = addon.name.strip().lower()
     package = addon.package_name.strip().lower()
     return addon.simulator == "MSFS 2024" and package == "inibuilds-aircraft-a340" and (
-        "a340-300" in name or "a343" in name or "a340-600" in name or "a346" in name
+        "a340-300" in name or "a343" in name or package == "inibuilds-aircraft-a340"
     )
 
 
@@ -2840,7 +3035,10 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
     if not hay:
         return False
 
-    if package.startswith("pmdg-aircraft-73") or "pmdg 737" in name:
+    if is_ifly_737max8_addon(addon):
+        return "ifly" in hay and ("737-max8" in hay or "737max8" in compact or "max8" in compact)
+
+    if is_pmdg_737_addon(addon):
         if "pmdg" not in hay:
             return False
         if "737-600" in name and ("737-600" in hay or "736" in hay):
@@ -2889,6 +3087,10 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
     if package in {"inibuilds-aircraft-a340", "inibuilds-aircraft-a350"}:
         if "inibuilds" not in hay:
             return False
+        if is_inibuilds_msfs2024_a340_addon(addon):
+            if "dfd" in hay:
+                return not _is_a346_text(hay, compact)
+            return _is_inibuilds_a340_text(hay, compact) and not _is_a346_text(hay, compact)
         if "dfd" in hay:
             return True
         if package == "inibuilds-aircraft-a350" or "a350" in name:
@@ -2907,6 +3109,48 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
     return text_matches_addon_signature(addon, cycle_name)
 
 
+def cycle_name_is_generic_for_addon(addon: Addon, cycle_name: str) -> bool:
+    hay = cycle_name.strip().lower()
+    compact = re.sub(r"[^a-z0-9]+", "", hay)
+    name = addon.name.strip().lower()
+    package = addon.package_name.strip().lower()
+
+    if not hay:
+        return False
+
+    if is_ifly_737max8_addon(addon):
+        if "ifly" not in hay:
+            return False
+        return not any(token in compact for token in ("737max8", "max8", "b738m", "b38m"))
+
+    if is_pmdg_737_addon(addon):
+        if "pmdg" not in hay:
+            return False
+        specific_tokens = ("736", "737600", "737700", "738", "737800", "739", "737900")
+        return not any(token in compact for token in specific_tokens)
+
+    if package.startswith("pmdg-aircraft-77") or "pmdg 777" in name:
+        if "pmdg" not in hay:
+            return False
+        specific_tokens = (
+            "77l",
+            "777200lr",
+            "200lr",
+            "77er",
+            "777200er",
+            "200er",
+            "77f",
+            "777f",
+            "freighter",
+            "77w",
+            "777300er",
+            "300er",
+        )
+        return not any(token in compact for token in specific_tokens)
+
+    return False
+
+
 def text_matches_addon_signature(addon: Addon, text: str) -> bool:
     hay = text.strip().lower()
     if not hay:
@@ -2916,6 +3160,80 @@ def text_matches_addon_signature(addon: Addon, text: str) -> bool:
     if strong_tokens:
         return any(token in hay for token in strong_tokens)
     return any(token in hay for token in tokens)
+
+
+def folder_name_matches_addon_signature(addon: Addon, candidate_dir: Path) -> bool:
+    parts = _normalized_path_parts(candidate_dir)
+    if not parts:
+        return False
+
+    package = addon.package_name.strip().lower()
+    name = addon.name.strip().lower()
+
+    def part_has(token: str) -> bool:
+        token_norm = _norm_token(token)
+        if not token_norm:
+            return False
+        return any(token_norm in part for part in parts)
+
+    # Keep the two 737 families disjoint before any fallback matching.
+    if is_ifly_737max8_addon(addon):
+        if part_has("pmdg") or part_has("pmdg-aircraft-73"):
+            return False
+        return part_has("ifly") and (
+            part_has("ifly-aircraft-737max8")
+            or part_has("737max8")
+            or part_has("max8")
+            or part_has("b738m")
+            or part_has("b38m")
+        )
+
+    if is_pmdg_737_addon(addon):
+        if part_has("ifly") or part_has("ifly-aircraft-737max8"):
+            return False
+        expected_package = infer_package_name(addon)
+        if expected_package and part_has(expected_package):
+            return True
+        if package == "pmdg-aircraft-736":
+            return part_has("736") or part_has("737600")
+        if package == "pmdg-aircraft-737":
+            return part_has("737") or part_has("737700")
+        if package == "pmdg-aircraft-738":
+            return part_has("738") or part_has("737800")
+        if package == "pmdg-aircraft-739":
+            return part_has("739") or part_has("737900")
+        return part_has("pmdg") and any(part_has(token) for token in ("736", "737", "738", "739"))
+
+    # Package-root validation for the rest of the catalog.
+    if package == "inibuilds-aircraft-a340" and is_inibuilds_msfs2024_a340_addon(addon):
+        return part_has("inibuilds") and part_has("a340") and not (part_has("a340-600") or part_has("a346"))
+
+    expected = infer_package_name(addon)
+    if expected and part_has(expected):
+        return True
+
+    if package == "fnx-aircraft-320":
+        return part_has("fenix")
+    if package == "fslabs-aircraft-a321":
+        return part_has("fslabs")
+    if package == "tfdidesign-aircraft-md11":
+        return part_has("tfdi") or part_has("md11")
+    if package == "fycyc-aircraft-c919x":
+        return part_has("fycyc") or part_has("c919")
+    if package == "justflight-aircraft-rj":
+        return part_has("justflight") and part_has("rj")
+    if package == "aerosoft-aircraft-a346-pro":
+        return part_has("aerosoft") or part_has("a346") or part_has("toliss")
+    if package == "inibuilds-aircraft-a340":
+        return part_has("inibuilds") and part_has("a340")
+    if package == "inibuilds-aircraft-a350":
+        return part_has("inibuilds") and part_has("a350")
+    if package == "ifly-aircraft-737max8":
+        return part_has("ifly") and (part_has("737max8") or part_has("max8") or part_has("b738m"))
+    if package == "aerosoft-crj":
+        return part_has("aerosoft") and part_has("crj")
+
+    return text_matches_addon_signature(addon, "/".join(parts))
 
 
 def cycle_name_needs_path_disambiguation(addon: Addon, cycle_name: str) -> bool:
@@ -2952,97 +3270,23 @@ def cycle_name_needs_path_disambiguation(addon: Addon, cycle_name: str) -> bool:
 
 
 def path_matches_addon_signature(addon: Addon, candidate_dir: Path, cycle_json_path: Path | None = None) -> bool:
-    haystack = str(candidate_dir).lower().replace("\\", "/")
-    package = addon.package_name.strip().lower()
-    name = addon.name.strip().lower()
-
-    # PMDG families must match their package folder signature to avoid
-    # accidental cross-match with other 737/777 addons (e.g. iFly MAX8).
-    if package.startswith("pmdg-aircraft-73") or "pmdg 737" in name:
-        if package and package not in haystack:
-            return False
-    if package.startswith("pmdg-aircraft-77") or "pmdg 777" in name:
-        if package and package not in haystack:
-            return False
-
-    # A340 families can share generic tokens like "a340" in path/cycle metadata.
-    # Enforce package-level separation to avoid Aerosoft A346 matching iniBuilds A340.
-    if package == "aerosoft-aircraft-a346-pro":
-        if "inibuilds-aircraft-a340" in haystack:
-            return False
-        if "aerosoft-aircraft-a346-pro" not in haystack:
-            return False
-    if package == "inibuilds-aircraft-a340":
-        if addon.simulator == "MSFS 2024":
-            if (
-                "microsoft flight simulator 2024" not in haystack
-                and "microsoft.limitless_8wekyb3d8bbwe" not in haystack
-                and "/msfs2024/" not in haystack
-            ):
-                return False
-        elif addon.simulator == "MSFS 2020":
-            if (
-                "microsoft flight simulator 2024" in haystack
-                or "microsoft.limitless_8wekyb3d8bbwe" in haystack
-                or "/msfs2024/" in haystack
-            ):
-                return False
-        if "aerosoft-aircraft-a346-pro" in haystack:
-            return False
-        if "inibuilds-aircraft-a350" in haystack:
-            return False
-        if "inibuilds-aircraft-a340" not in haystack:
-            return False
-    if package == "inibuilds-aircraft-a350":
-        if addon.simulator == "MSFS 2024":
-            if (
-                "microsoft flight simulator 2024" not in haystack
-                and "microsoft.limitless_8wekyb3d8bbwe" not in haystack
-                and "/msfs2024/" not in haystack
-            ):
-                return False
-        elif addon.simulator == "MSFS 2020":
-            if (
-                "microsoft flight simulator 2024" in haystack
-                or "microsoft.limitless_8wekyb3d8bbwe" in haystack
-                or "/msfs2024/" in haystack
-            ):
-                return False
-        if "aerosoft-aircraft-a346-pro" in haystack:
-            return False
-        if "inibuilds-aircraft-a340" in haystack:
-            return False
-        if "inibuilds-aircraft-a350" not in haystack:
-            return False
-
-    # Hard guard for known conflicting families (RJ vs CRJ).
-    if package == "justflight-aircraft-rj" or "rj professional" in name:
-        if "aerosoft-crj" in haystack:
-            return False
-        if "justflight-aircraft-rj" not in haystack:
-            return False
-    if package == "aerosoft-crj" or "crj" in name:
-        if "justflight-aircraft-rj" in haystack:
-            return False
+    folder_ok = folder_name_matches_addon_signature(addon, candidate_dir)
+    if not folder_ok:
+        return False
 
     if cycle_json_path is not None:
         cycle_name = read_cycle_json_name(cycle_json_path)
         if cycle_name:
             if cycle_name_matches_addon(addon, cycle_name):
-                if cycle_name_needs_path_disambiguation(addon, cycle_name):
-                    return text_matches_addon_signature(addon, str(candidate_dir))
+                return True
+            if cycle_name_is_generic_for_addon(addon, cycle_name):
                 return True
             if addon_requires_cycle_name_match(addon):
                 return False
-            # Some addons (e.g. PMDG family) may write a generic cycle name such as "PMDG".
-            # In this case, fallback to path-signature matching instead of rejecting directly.
-            return text_matches_addon_signature(addon, str(candidate_dir))
-        # Some packages ship cycle.json without a stable "name" field.
-        # For those, fallback to folder-signature matching.
+            return False
         if addon_requires_cycle_name_match(addon):
             return False
-        return text_matches_addon_signature(addon, str(candidate_dir))
-    return text_matches_addon_signature(addon, str(candidate_dir))
+    return True
 
 
 def auto_detect_cycle_json_target(addon: Addon, state: dict | None = None) -> Path | None:
@@ -3492,10 +3736,20 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     for item in addon_items:
         if not isinstance(item, dict):
             continue
+        addon_obj = _addon_from_dict(item)
         name = str(item.get("name", "")).strip().lower()
         package = str(item.get("package_name", "")).strip().lower()
         target = str(item.get("target_path", "")).strip().lower().replace("\\", "/")
         expected_package = expected_packages.get(name)
+        if (
+            str(item.get("simulator", "")).strip() == "MSFS 2024"
+            and package == "inibuilds-aircraft-a340"
+            and ("a340-600" in name or "a346" in name)
+        ):
+            item["name"] = "iniBuilds A340-300"
+            item["description"] = "iniBuilds A340 family"
+            item["navdata_subpath"] = r"work\NavigationData"
+            migrated = True
         if expected_package and package != expected_package:
             item["package_name"] = expected_package
             migrated = True
@@ -3509,6 +3763,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if (package == "justflight-aircraft-rj" or "rj professional" in name) and "aerosoft-crj" in target:
             item["target_path"] = ""
             migrated = True
+        if is_ifly_737max8_addon(addon_obj):
+            if "pmdg-aircraft-73" in target or "pmdg 737" in target:
+                item["target_path"] = ""
+                migrated = True
     deduped_addons: list[dict] = []
     seen_addon_keys: set[tuple[str, str, str]] = set()
     for item in addon_items:
@@ -3597,6 +3855,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     op_hide_button = ft.TextButton("返回")
     backup_power_login_valid = False
     one_click_install_filter_button: ft.Button | None = None
+    backup_power_login_button: ft.Button | None = None
+    cycle_dropdown: ft.Dropdown | None = None
+    cycle_dropdown_options_cache: list[str] = []
+    cycle_dropdown_value: str = ""
     startup_update_check_skip = False
     startup_update_release_url = ""
     startup_update_overlay_container = ft.Container(visible=False)
@@ -4327,20 +4589,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         dlg = ft.AlertDialog(
             modal=True,
             title=ft.Text(title),
-            content=ft.Column(
-                tight=True,
-                spacing=12,
-                controls=[
-                    ft.Text(message, selectable=True),
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.END,
-                        controls=[
-                            ft.TextButton("取消", on_click=no_click),
-                            ft.TextButton("继续", on_click=yes_click),
-                        ],
-                    ),
-                ],
-            ),
+            content=ft.Text(message, selectable=True),
+            actions=[
+                ft.TextButton("取消", on_click=no_click),
+                ft.TextButton("继续", on_click=yes_click),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
         )
         try:
             try:
@@ -4957,7 +5211,21 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 return
             reset_operation_dialog_suppression()
             set_button_busy(button, True, "处理中...")
-            page.run_task(on_update_navdata_click, addon_key_value, button)
+            chosen_cycle = (cycle_dropdown_value or "").strip() if backup_power_login_valid else ""
+
+            async def _runner():
+                try:
+                    if chosen_cycle:
+                        ok = await confirm_non_latest_cycle(chosen_cycle)
+                        if not ok:
+                            snack("已取消本次安装。")
+                            set_button_busy(button, False)
+                            return
+                    await on_update_navdata_click(addon_key_value, button, forced_cycle_id=chosen_cycle or None)
+                finally:
+                    pass
+
+            page.run_task(_runner)
 
         return _handler
 
@@ -5176,7 +5444,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if not path_text:
             return "Target path not set"
         if streamer_mode:
-            return "路径已隐藏（主播模式）"
+            return "路径已隐藏"
         return path_text
 
     def open_folder(path_text: str) -> None:
@@ -5195,6 +5463,44 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             snack(f"目标文件夹不存在，已打开上级目录: {p.parent}")
             return
         snack(f"路径不存在: {path_text}")
+
+    def find_latest_backup_for_addon(addon: Addon) -> Path | None:
+        safe_name = addon.name.replace("/", "_").replace("\\", "_")
+        backup_root = BACKUP_DIR / safe_name
+        if not backup_root.exists() or not backup_root.is_dir():
+            return None
+        candidates = [p for p in backup_root.iterdir() if p.is_dir()]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+        return candidates[0]
+
+    def restore_addon_backup(addon: Addon, target: Path) -> None:
+        latest_backup = find_latest_backup_for_addon(addon)
+        if latest_backup is None:
+            snack(f"{addon.name}: 未找到可恢复的备份")
+            return
+        if target.exists() and not target.is_dir():
+            snack(f"{addon.name}: 目标路径不是文件夹")
+            return
+        try:
+            if not target.exists():
+                target.mkdir(parents=True, exist_ok=True)
+            for child in target.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink(missing_ok=True)
+            for item in latest_backup.iterdir():
+                dest = target / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dest)
+            snack(f"{addon.name}: 已恢复上次安装的文件")
+            log(f"{addon.name}: restored backup from {latest_backup}")
+        except Exception as exc:
+            snack(f"{addon.name}: 恢复失败: {exc}")
 
     def refresh_cycle() -> None:
         nonlocal current_cycle_info
@@ -5383,7 +5689,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                         on_click=lambda _e, p=target: open_folder(p),
                                     ),
                                     ft.Button(
-                                        "恢复",
+                                        "恢复上次安装的文件",
                                         icon=ft.Icons.RESTORE,
                                         bgcolor="#b83d4b",
                                         color="#ffffff",
@@ -5391,7 +5697,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                         style=ft.ButtonStyle(
                                             padding=ft.Padding.symmetric(horizontal=10, vertical=0),
                                         ),
-                                        on_click=lambda _e, n=addon.name: snack(f"{n}: 备份恢复流程下一步迁移"),
+                                        on_click=lambda _e, a=addon, p=target: restore_addon_backup(a, Path(p) if not isinstance(p, Path) else p),
                                     ),
                                 ],
                             ),
@@ -6308,7 +6614,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             api,
                             user,
                             pwd,
-                            message="正在登录后备隐藏能源",
+                            message="正在登录",
                             pulse_interval=0.8,
                             show_page_loading=False,
                             show_operation_dialog_ui=False,
@@ -6327,7 +6633,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             f"Token 长度: {token_len}\n"
                             f"登录时间: {state['backup_power_last_login_at']}"
                         )
-                        snack("后备隐藏能源登录成功")
+                        snack("账号登录成功")
                         if not try_control_update(dlg):
                             page.update()
                         close_dialog()
@@ -6361,27 +6667,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
             dlg = custom_modal_container
             open_custom_modal(
-                "后备隐藏能源",
+                "登录系统",
                 [
                     ft.Text("账号登录", size=fs(14), weight=ft.FontWeight.W_700, color=colors["text_title"]),
                     ft.Row(spacing=8, controls=[user_field, pass_field]),
                     ft.Text("账号和密码仅支持英文字符（ASCII）。", size=fs(11), color=colors["text_sub"]),
                     input_notice_text,
-                    ft.Text(
-                        "OpenList 会在后台自动登录并自动刷新 Token，无需用户手动登录。当前窗口只用于 DATA 域名登录。",
-                        size=fs(11),
-                        color=colors["text_sub"],
-                    ),
-                    ft.Text(
-                        "若使用 OpenList 账号（如 admin/navdata）登录此窗口，接口通常会返回 401 invalid credentials。",
-                        size=fs(11),
-                        color=colors["text_sub"],
-                    ),
-                    ft.Text(
-                        "OpenList 缓存目录可在“设置”中自定义，安装后会自动清理下载缓存。",
-                        size=fs(11),
-                        color=colors["text_sub"],
-                    ),
+                    
                     ft.Text(f"当前 Token: {token_mask}    上次登录: {last_login}", size=fs(11), color=colors["text_sub"]),
                     err_text,
                     result_text,
@@ -6399,7 +6691,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             if str(state.get("backup_power_token", "")).strip():
                 page.run_task(try_reuse_saved_token, False, True)
         except Exception as exc:
-            snack(f"后备隐藏能源失败: {exc}")
+            snack(f"登录失败: {exc}")
 
     def on_wasm_paths_click(_e):
         try:
@@ -6514,12 +6806,107 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def set_backup_power_login_valid(valid: bool) -> None:
         nonlocal backup_power_login_valid
+        was_valid = backup_power_login_valid
         backup_power_login_valid = bool(valid)
-        if one_click_install_filter_button is None:
+        if one_click_install_filter_button is not None:
+            one_click_install_filter_button.visible = backup_power_login_valid
+            one_click_install_filter_button.disabled = not backup_power_login_valid
+            update_controls(one_click_install_filter_button)
+        if backup_power_login_button is not None:
+            backup_power_login_button.visible = not backup_power_login_valid
+            backup_power_login_button.disabled = backup_power_login_valid
+            update_controls(backup_power_login_button)
+        if cycle_dropdown is not None:
+            cycle_dropdown.visible = backup_power_login_valid
+            cycle_dropdown.disabled = not backup_power_login_valid
+            update_controls(cycle_dropdown)
+        if backup_power_login_valid and not was_valid:
+            page.run_task(refresh_cycle_dropdown_options)
+
+    async def refresh_cycle_dropdown_options() -> None:
+        nonlocal cycle_dropdown_options_cache, cycle_dropdown_value
+        if cycle_dropdown is None:
             return
-        one_click_install_filter_button.visible = backup_power_login_valid
-        one_click_install_filter_button.disabled = not backup_power_login_valid
-        update_controls(one_click_install_filter_button)
+        try:
+            items = await asyncio.to_thread(openlist_list_dir_auto_request, OPENLIST_ROOT_PATH)
+        except Exception as exc:
+            log(f"获取 OpenList 期数列表失败: {exc}")
+            return
+        cycle_dirs: list[str] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if not bool(item.get("is_dir")):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name or not re.fullmatch(r"\d{4}", name):
+                continue
+            cycle_dirs.append(name)
+
+        async def has_msfs(cycle_id: str) -> bool:
+            try:
+                sub = await asyncio.to_thread(openlist_list_dir_auto_request, openlist_cycle_path(cycle_id))
+            except Exception:
+                return False
+            for it in sub or []:
+                if not isinstance(it, dict):
+                    continue
+                if bool(it.get("is_dir")) and str(it.get("name", "")).strip().lower() == "msfs":
+                    return True
+            return False
+
+        checks = await asyncio.gather(*[has_msfs(c) for c in cycle_dirs], return_exceptions=True)
+        with_msfs = [c for c, ok in zip(cycle_dirs, checks) if ok is True]
+        with_msfs.sort(reverse=True)
+        cycle_dropdown_options_cache = with_msfs
+        cycle_dropdown.options = [ft.dropdown.Option(c) for c in with_msfs]
+        saved = str(state.get("selected_install_cycle", "")).strip()
+        if saved in with_msfs:
+            cycle_dropdown_value = saved
+        elif with_msfs:
+            cycle_dropdown_value = with_msfs[0]
+        else:
+            cycle_dropdown_value = ""
+        cycle_dropdown.value = cycle_dropdown_value or None
+        update_controls(cycle_dropdown)
+
+    def on_cycle_dropdown_change(e):
+        nonlocal cycle_dropdown_value
+        raw = getattr(e, "data", None)
+        if raw is None:
+            raw = getattr(getattr(e, "control", None), "value", "")
+        if isinstance(raw, dict):
+            raw = raw.get("value") or raw.get("key") or ""
+        if hasattr(raw, "value"):
+            raw = raw.value
+        cycle_dropdown_value = str(raw or "").strip()
+        state["selected_install_cycle"] = cycle_dropdown_value
+        save_state(state)
+
+    async def confirm_non_latest_cycle(target_cycle: str) -> bool:
+        target_cycle = (target_cycle or "").strip()
+        if not target_cycle:
+            return True
+        latest = cycle_dropdown_options_cache[0] if cycle_dropdown_options_cache else ""
+        if not latest or target_cycle == latest:
+            return True
+        result_future: asyncio.Future[bool] = asyncio.get_event_loop().create_future()
+
+        def _yes():
+            if not result_future.done():
+                result_future.set_result(True)
+
+        def _no():
+            if not result_future.done():
+                result_future.set_result(False)
+
+        show_confirm_dialog(
+            "确认安装非最新期数",
+            f"当前选择的期数为 {target_cycle}，并非服务器最新期数 {latest}。\n确定要继续安装非最新期数的导航数据吗？",
+            on_yes=_yes,
+            on_no=_no,
+        )
+        return await result_future
 
     async def refresh_backup_power_login_validity(notify_invalid: bool = False) -> bool:
         token = str(state.get("backup_power_token", "")).strip()
@@ -6534,7 +6921,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             log(f"DATA token 校验失败: {exc}")
             set_backup_power_login_valid(False)
             if notify_invalid:
-                snack("登录状态已失效，请重新登录后备隐藏能源。")
+                snack("登录状态已失效，请重新登录。")
             return False
 
     def on_one_click_install_click(e):
@@ -6558,7 +6945,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     return
 
                 fallback_cycle = ""
-                if current_cycle_info and current_cycle_info.get("cycle_id"):
+                chosen_cycle = (cycle_dropdown_value or "").strip()
+                if chosen_cycle:
+                    fallback_cycle = detect_airac(chosen_cycle)
+                if fallback_cycle in {"", "UNKNOWN"} and current_cycle_info and current_cycle_info.get("cycle_id"):
                     fallback_cycle = detect_airac(str(current_cycle_info.get("cycle_id", "")))
                 if fallback_cycle in {"", "UNKNOWN"}:
                     cycle_info = await asyncio.to_thread(fetch_current_cycle)
@@ -6567,6 +6957,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 if fallback_cycle in {"", "UNKNOWN"}:
                     snack("未获取到有效 AIRAC 期数，无法执行一键安装。")
                     return
+
+                if chosen_cycle and detect_airac(chosen_cycle) == fallback_cycle:
+                    ok = await confirm_non_latest_cycle(fallback_cycle)
+                    if not ok:
+                        append_install_overlay_line("已取消一键安装。")
+                        snack("已取消一键安装。")
+                        return
 
                 open_install_overlay(title=f"安装状态 - 一键安装 {simulator} / {platform}", reset=True)
                 append_install_overlay_line(f"一键安装开始: {simulator} / {platform}")
@@ -6770,7 +7167,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             btn.bgcolor = colors["filter_active_bg"] if selected else colors["switch_unsel_bg"]
             btn.color = colors["filter_active_fg"] if selected else colors["switch_unsel_fg"]
 
-    streamer_button = build_top_action_button("主播模式", on_click=on_streamer_mode_click)
+    streamer_button = build_top_action_button("隐藏路径", on_click=on_streamer_mode_click)
+    backup_power_login_button = build_top_action_button(
+        "登录下载系统",
+        on_click=on_backup_power_click,
+        icon=ft.Icons.AUTO_AWESOME,
+        bgcolor=colors["filter_active_bg"],
+        color=colors["filter_active_fg"],
+    )
     one_click_install_filter_button = ft.Button(
         "一键安装",
         on_click=on_one_click_install_click,
@@ -6784,9 +7188,20 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             text_style=ft.TextStyle(weight=ft.FontWeight.W_600),
         ),
     )
+    cycle_dropdown = ft.Dropdown(
+        label="期数",
+        width=130,
+        dense=True,
+        visible=False,
+        disabled=True,
+        options=[],
+        on_select=on_cycle_dropdown_change,
+        text_style=ft.TextStyle(size=12),
+        content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+    )
 
     def refresh_streamer_button() -> None:
-        setattr(streamer_button, "text", "关闭主播模式" if streamer_mode else "主播模式")
+        setattr(streamer_button, "text", "隐藏路径" if streamer_mode else "显示路径")
         if streamer_mode:
             streamer_button.bgcolor = colors["filter_active_bg"]
             streamer_button.color = colors["filter_active_fg"]
@@ -6981,13 +7396,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         controls=[
                             ft.Row(
                                 spacing=6,
+                                wrap=True,
                                 controls=[
-                                    build_top_action_button(
-                                        "启动后备隐藏能源",
-                                        on_click=on_backup_power_click,
-                                        bgcolor=colors["panel_soft_bg"],
-                                        color=colors["text_meta"],
-                                    ),
+                                    backup_power_login_button,
                                     build_top_action_button("设置", on_click=on_settings_click),
                                     build_top_action_button("添加机型", on_click=on_add_addon_click),
                                     build_top_action_button("重新扫描", on_click=on_rescan_click),
@@ -7014,7 +7425,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
                     on_change=on_search_change,
                 ),
-                ft.Row(spacing=6, wrap=True, controls=[*list(filter_chips.values()), one_click_install_filter_button]),
+                ft.Row(spacing=6, wrap=True, controls=[*list(filter_chips.values()), one_click_install_filter_button, cycle_dropdown]),
                 ft.Container(
                     expand=False,
                     border_radius=16,
@@ -7334,21 +7745,180 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         show_loading_state("正在初始化...")
 
         async def bootstrap() -> None:
-            cleanup_result = await asyncio.to_thread(cleanup_stale_cache_entries, state)
-            if cleanup_result.get("ran"):
-                save_state(state)
-                removed = int(cleanup_result.get("removed", 0))
-                days = int(cleanup_result.get("days", DEFAULT_CACHE_CLEANUP_DAYS))
-                log(f"缓存定期清理完成：清理周期 {days} 天，删除 {removed} 项过期缓存。")
-            await run_startup_update_check()
-            await refresh_backup_power_login_validity(notify_invalid=False)
-            await refresh_cycle_async(notify_fail=False)
-            await rescan_and_rebuild_async(show_loading=False, notify_done=False)
+            try:
+                try:
+                    cleanup_result = await asyncio.wait_for(
+                        asyncio.to_thread(cleanup_stale_cache_entries, state),
+                        timeout=20,
+                    )
+                    if cleanup_result.get("ran"):
+                        save_state(state)
+                        removed = int(cleanup_result.get("removed", 0))
+                        days = int(cleanup_result.get("days", DEFAULT_CACHE_CLEANUP_DAYS))
+                        log(f"缓存定期清理完成：清理周期 {days} 天，删除 {removed} 项过期缓存。")
+                except TimeoutError:
+                    log("缓存清理超时，已跳过。")
+                except Exception as exc:
+                    log(f"缓存清理失败：{exc}")
+
+                try:
+                    await asyncio.wait_for(run_startup_update_check(), timeout=30)
+                except TimeoutError:
+                    log("启动更新检查超时，已跳过。")
+                except Exception as exc:
+                    log(f"启动更新检查失败：{exc}")
+
+                try:
+                    await asyncio.wait_for(refresh_backup_power_login_validity(notify_invalid=False), timeout=15)
+                except TimeoutError:
+                    log("DATA Token 校验超时，已跳过。")
+                except Exception as exc:
+                    log(f"DATA Token 校验失败：{exc}")
+
+                try:
+                    await asyncio.wait_for(refresh_cycle_async(notify_fail=False), timeout=20)
+                except TimeoutError:
+                    log("AIRAC 刷新超时，已跳过。")
+                except Exception as exc:
+                    log(f"AIRAC 刷新失败：{exc}")
+
+                try:
+                    await asyncio.wait_for(
+                        rescan_and_rebuild_async(show_loading=False, notify_done=False),
+                        timeout=120,
+                    )
+                except TimeoutError:
+                    log("资源扫描超时，已跳过。")
+                except Exception as exc:
+                    log(f"资源扫描失败：{exc}")
+            finally:
+                try:
+                    await rebuild_lists_async(show_loading=False)
+                except Exception as exc:
+                    log(f"启动收尾刷新失败：{exc}")
 
         page.run_task(bootstrap)
     else:
         trigger_rebuild(show_loading=True)
         page.run_task(refresh_backup_power_login_validity, False)
+
+
+Addon = state_mod.Addon
+APP_NAME = state_mod.APP_NAME
+APP_EXECUTABLE_NAME = state_mod.APP_EXECUTABLE_NAME
+INSTALLER_PACKAGE_NAME = state_mod.INSTALLER_PACKAGE_NAME
+INSTALLER_EXECUTABLE_NAME = state_mod.INSTALLER_EXECUTABLE_NAME
+ROAMING_DIR = state_mod.ROAMING_DIR
+LOCAL_DIR = state_mod.LOCAL_DIR
+STATE_FILE = state_mod.STATE_FILE
+BACKUP_DIR = state_mod.BACKUP_DIR
+APP_VERSION = state_mod.APP_VERSION
+MSFS_VERSIONS = state_mod.MSFS_VERSIONS
+PLATFORMS = state_mod.PLATFORMS
+THEME_LIGHT = state_mod.THEME_LIGHT
+THEME_DARK = state_mod.THEME_DARK
+DEFAULT_BATCH_DOWNLOAD_WORKERS = state_mod.DEFAULT_BATCH_DOWNLOAD_WORKERS
+DEFAULT_CACHE_CLEANUP_DAYS = state_mod.DEFAULT_CACHE_CLEANUP_DAYS
+CACHE_CLEANUP_DAY_OPTIONS = state_mod.CACHE_CLEANUP_DAY_OPTIONS
+DEFAULT_SIM_PLATFORM_VARIANTS = state_mod.DEFAULT_SIM_PLATFORM_VARIANTS
+DEFAULT_ADDON_FAMILIES = state_mod.DEFAULT_ADDON_FAMILIES
+load_state = state_mod.load_state
+save_state = state_mod.save_state
+to_addon = state_mod.to_addon
+default_addons = state_mod.default_addons
+community_key = state_mod.community_key
+normalize_cache_cleanup_days = state_mod.normalize_cache_cleanup_days
+normalize_batch_download_workers = state_mod.normalize_batch_download_workers
+
+infer_package_name = targets_mod.infer_package_name
+addon_search_tokens = targets_mod.addon_search_tokens
+is_pmdg_737_addon = targets_mod.is_pmdg_737_addon
+is_ifly_737max8_addon = targets_mod.is_ifly_737max8_addon
+text_matches_addon_signature = targets_mod.text_matches_addon_signature
+cycle_name_matches_addon = targets_mod.cycle_name_matches_addon
+cycle_name_is_generic_for_addon = targets_mod.cycle_name_is_generic_for_addon
+folder_name_matches_addon_signature = targets_mod.folder_name_matches_addon_signature
+path_matches_addon_signature = targets_mod.path_matches_addon_signature
+
+COMMON_ARCHIVE_SUFFIXES = archive_mod.COMMON_ARCHIVE_SUFFIXES
+normalize_zip_member = archive_mod.normalize_zip_member
+inspect_zip_cycle_payload = archive_mod.inspect_zip_cycle_payload
+load_cycle_json_payload = archive_mod.load_cycle_json_payload
+extract_airac_from_value = archive_mod.extract_airac_from_value
+read_cycle_from_payload = archive_mod.read_cycle_from_payload
+read_cycle_json = archive_mod.read_cycle_json
+read_cycle_json_name = archive_mod.read_cycle_json_name
+inspect_extracted_cycle_payload = archive_mod.inspect_extracted_cycle_payload
+is_supported_archive_file = archive_mod.is_supported_archive_file
+_archive_kind = archive_mod._archive_kind
+extract_archive_cycle_json_to_temp = archive_mod.extract_archive_cycle_json_to_temp
+extract_archive_to_temp = archive_mod.extract_archive_to_temp
+prepare_archive_payload = archive_mod.prepare_archive_payload
+
+BACKUP_POWER_SERVER_BASE = openlist_mod.BACKUP_POWER_SERVER_BASE
+BACKUP_POWER_LOGIN_URL = openlist_mod.BACKUP_POWER_LOGIN_URL
+BACKUP_POWER_NAVDATA_DOWNLOAD_URL = openlist_mod.BACKUP_POWER_NAVDATA_DOWNLOAD_URL
+BACKUP_POWER_ME_URL = openlist_mod.BACKUP_POWER_ME_URL
+OPENLIST_BASE_URL = openlist_mod.OPENLIST_BASE_URL
+OPENLIST_LOGIN_URL = openlist_mod.OPENLIST_LOGIN_URL
+OPENLIST_LIST_URL = openlist_mod.OPENLIST_LIST_URL
+OPENLIST_GET_URL = openlist_mod.OPENLIST_GET_URL
+OPENLIST_ROOT_PATH = openlist_mod.OPENLIST_ROOT_PATH
+OPENLIST_USERNAME = openlist_mod.OPENLIST_USERNAME
+OPENLIST_PASSWORD = openlist_mod.OPENLIST_PASSWORD
+OPENLIST_TOKEN_CACHE = openlist_mod.OPENLIST_TOKEN_CACHE
+OPENLIST_ARCHIVE_NAME_HINTS = openlist_mod.OPENLIST_ARCHIVE_NAME_HINTS
+normalize_backup_power_login_url = openlist_mod.normalize_backup_power_login_url
+normalize_backup_power_download_dir = openlist_mod.normalize_backup_power_download_dir
+backup_power_login_request = openlist_mod.backup_power_login_request
+backup_power_me_request = openlist_mod.backup_power_me_request
+openlist_login_request = openlist_mod.openlist_login_request
+openlist_list_dir_request = openlist_mod.openlist_list_dir_request
+openlist_list_dir_auto_request = openlist_mod.openlist_list_dir_auto_request
+openlist_get_file_meta_request = openlist_mod.openlist_get_file_meta_request
+openlist_get_file_meta_auto_request = openlist_mod.openlist_get_file_meta_auto_request
+openlist_cycle_path = openlist_mod.openlist_cycle_path
+openlist_cycle_msfs_path = openlist_mod.openlist_cycle_msfs_path
+find_openlist_cycle_folder = openlist_mod.find_openlist_cycle_folder
+find_openlist_cycle_msfs_folder = openlist_mod.find_openlist_cycle_msfs_folder
+list_openlist_cycle_msfs_items = openlist_mod.list_openlist_cycle_msfs_items
+select_openlist_archive_for_addon = openlist_mod.select_openlist_archive_for_addon
+download_openlist_archive_for_addon = openlist_mod.download_openlist_archive_for_addon
+
+github_api_json = network_mod.github_api_json
+fetch_latest_github_release_atom = network_mod.fetch_latest_github_release_atom
+fetch_latest_github_release = network_mod.fetch_latest_github_release
+fetch_current_cycle = network_mod.fetch_current_cycle
+
+human_time = utils_mod.human_time
+human_datetime = utils_mod.human_datetime
+fs = utils_mod.fs
+get_colors = utils_mod.get_colors
+detect_airac = utils_mod.detect_airac
+parse_iso_utc = utils_mod.parse_iso_utc
+format_version_display = utils_mod.format_version_display
+_is_newer_version = utils_mod._is_newer_version
+append_log_file = utils_mod.append_log_file
+read_log_lines = utils_mod.read_log_lines
+_ensure_installer_not_running = utils_mod._ensure_installer_not_running
+
+addon_key = catalog_mod.addon_key
+resolve_wasm_target_by_folder_name = catalog_mod.resolve_wasm_target_by_folder_name
+resolve_target_dir = catalog_mod.resolve_target_dir
+addon_status = catalog_mod.addon_status
+compute_filtered_addon_entries = catalog_mod.compute_filtered_addon_entries
+matches_filter = catalog_mod.matches_filter
+status_badge_style = catalog_mod.status_badge_style
+status_dot_color = catalog_mod.status_dot_color
+
+cleanup_backup_power_download_cache = maintenance_mod.cleanup_backup_power_download_cache
+cleanup_stale_cache_entries = maintenance_mod.cleanup_stale_cache_entries
+default_backup_power_download_dir = maintenance_mod.default_backup_power_download_dir
+default_batch_download_cache_dir = maintenance_mod.default_batch_download_cache_dir
+ensure_backup_power_download_dir = maintenance_mod.ensure_backup_power_download_dir
+resolve_cache_root_dir = maintenance_mod.resolve_cache_root_dir
+resolve_existing_backup_power_download_dir = maintenance_mod.resolve_existing_backup_power_download_dir
+normalize_cache_root_dir = maintenance_mod.normalize_cache_root_dir
 
 
 if __name__ == "__main__":
