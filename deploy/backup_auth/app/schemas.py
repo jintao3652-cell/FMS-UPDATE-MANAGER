@@ -22,8 +22,17 @@ class MeResponse(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=64)
+    email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=1, max_length=256)
+    email_code: str = Field(min_length=4, max_length=16)
+    turnstile_token: str = Field(min_length=1, max_length=4096)
+
+
+class RegisterCodeRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    email: str = Field(min_length=3, max_length=255)
+    turnstile_token: str = Field(min_length=1, max_length=4096)
 
 
 class AdminCreateUserRequest(BaseModel):

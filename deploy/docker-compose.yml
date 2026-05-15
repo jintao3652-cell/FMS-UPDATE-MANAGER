@@ -1,0 +1,68 @@
+services:
+  db:
+    image: mysql:8.4
+    restart: always
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MYSQL_USER} -p${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  auth_api:
+    build: ./backup_auth
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_DB_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}?charset=utf8mb4
+      APP_JWT_SECRET: ${APP_JWT_SECRET}
+      APP_JWT_EXPIRE_MINUTES: ${APP_JWT_EXPIRE_MINUTES}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS}
+      APP_REGISTER_ATTEMPT_LIMIT: ${APP_REGISTER_ATTEMPT_LIMIT}
+      APP_REGISTER_ATTEMPT_WINDOW_SECONDS: ${APP_REGISTER_ATTEMPT_WINDOW_SECONDS}
+      APP_REGISTER_PER_IP_LIMIT: ${APP_REGISTER_PER_IP_LIMIT}
+      APP_REGISTER_PER_IP_WINDOW_SECONDS: ${APP_REGISTER_PER_IP_WINDOW_SECONDS}
+
+  admin_panel:
+    build: ./admin_panel
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      auth_api:
+        condition: service_started
+    environment:
+      APP_DB_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}?charset=utf8mb4
+      APP_JWT_SECRET: ${APP_JWT_SECRET}
+      APP_JWT_EXPIRE_MINUTES: ${APP_JWT_EXPIRE_MINUTES}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS}
+      APP_ADMIN_PORT: ${APP_ADMIN_PORT:-1145}
+    ports:
+      - "${APP_ADMIN_PORT:-1145}:1145"
+
+  register_ui:
+    build: ./register_ui
+    restart: always
+    depends_on:
+      auth_api:
+        condition: service_started
+    environment:
+      APP_AUTH_API_URL: http://auth_api:17306
+      APP_REGISTER_PUBLIC_AUTH_URL: ${APP_REGISTER_PUBLIC_AUTH_URL}
+    ports:
+      - "3090:3090"
+
+volumes:
+  mysql_data:

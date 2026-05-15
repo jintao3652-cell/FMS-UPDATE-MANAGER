@@ -1,103 +1,34 @@
-# FMS 后备隐藏能源登录服务部署（MySQL）
+# FMS Backup Power Auth API
 
-固定登录接口：
+**纯 API 服务**（端口 17306）。本服务只提供 JSON 接口，不再提供 HTML 页面。
 
-- `POST http://data.cnrpg.top:17306/api/auth/login`
+- 注册页 HTML 由独立服务 `register_ui` (端口 3090) 提供
+- 管理后台 UI 由独立服务 `admin_panel` (端口 1145) 提供
 
-新增页面：
+## 路由
 
-- 注册页：`http://data.cnrpg.top:17306/register`
-- 管理页：`http://data.cnrpg.top:17306/admin`
+- `GET /healthz`
+- `GET /api/public/turnstile_site_key` —— 公开接口，仅返回 site_key（不含 secret_key）
+- `POST /api/auth/register/code`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/me`
+- `GET /api/admin/users`、`POST /api/admin/users`、`PATCH /api/admin/users/{id}`、`PATCH /api/admin/users/{id}/password`、`DELETE /api/admin/users/{id}`
 
-## 1. 准备
+## 部署
 
-1. 域名 `data.cnrpg.top` 解析到服务器公网 IP
-2. 安装 Docker + Docker Compose（或 1Panel 编排）
-3. 放行端口 `17306/tcp`
-
-## 2. 配置环境变量
+合并到根目录统一部署，请使用 `deploy/docker-compose.yml`：
 
 ```bash
-cd /opt/fms-backup-auth
+cd deploy
 cp .env.example .env
-```
-
-修改 `.env`（至少）：
-
-- `MYSQL_PASSWORD`
-- `MYSQL_ROOT_PASSWORD`
-- `APP_JWT_SECRET`
-- `APP_ADMIN_PASSWORD`
-- SMTP（邮箱验证码必需）：
-  - `APP_SMTP_HOST`
-  - `APP_SMTP_PORT`
-  - `APP_SMTP_USER`
-  - `APP_SMTP_PASSWORD`
-  - `APP_SMTP_SENDER`
-  - `APP_SMTP_USE_SSL` / `APP_SMTP_USE_TLS`
-
-## 3. 启动
-
-```bash
+chmod 600 .env
 docker compose up -d --build
 ```
 
-查看状态：
+## 配置
 
-```bash
-docker compose ps
-docker compose logs -f auth_api
-```
-
-## 4. 接口验证
-
-```bash
-curl -X POST "http://data.cnrpg.top:17306/api/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"<你的管理员密码>","client":"FMS UPDATE MANAGER"}'
-```
-
-## 5. 客户端请求格式
-
-```json
-{
-  "username": "xxx",
-  "password": "xxx",
-  "client": "FMS UPDATE MANAGER",
-  "timestamp": "2026-..."
-}
-```
-
-返回格式兼容：
-
-```json
-{
-  "success": true,
-  "message": "ok",
-  "token": "xxxxx"
-}
-```
-
-## 6. Build 失败排查（pip 拉包）
-
-如遇：
-
-- `No matching distribution found`
-- `from versions: none`
-
-执行无缓存重建：
-
-```bash
-docker compose build --no-cache auth_api
-docker compose up -d
-```
-
-如需改阿里镜像源：
-
-```bash
-docker compose build \
-  --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
-  --build-arg PIP_TRUSTED_HOST=mirrors.aliyun.com \
-  --no-cache auth_api
-docker compose up -d
-```
+- 基础环境变量（DB / JWT / 管理员账号 / 注册风控）由 `deploy/.env` 提供。
+- SMTP 与 Cloudflare Turnstile 配置改为存放于数据库 `app_settings` 表，统一在 admin_panel 后台中编辑。
+- 未配置 SMTP 时，请求验证码接口返回 503。
+- 未配置 Turnstile secret_key 时跳过人机校验，注册页也不渲染 widget。

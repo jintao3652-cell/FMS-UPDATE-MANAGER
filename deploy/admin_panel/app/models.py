@@ -51,14 +51,13 @@ class EmailLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-class EmailVerificationCode(Base):
-    __tablename__ = "email_verification_codes"
+class AdminAudit(Base):
+    __tablename__ = "admin_audit"
 
-    email: Mapped[str] = mapped_column(String(255), primary_key=True)
-    code_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    sent_ip: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    admin_username: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    target: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    detail: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    ip: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

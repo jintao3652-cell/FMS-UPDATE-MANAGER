@@ -1,18 +1,25 @@
-﻿from collections import defaultdict
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+from email.utils import formataddr
+from hashlib import sha256
+from secrets import randbelow
 from threading import Lock
+import json
 import re
+import smtplib
+import ssl
 
+import httpx
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db
-from .models import LoginAudit, User
+from .models import AppSetting, EmailLog, EmailVerificationCode, LoginAudit, User
 from .schemas import (
     AdminCreateUserRequest,
     AdminUpdatePasswordRequest,
@@ -20,6 +27,7 @@ from .schemas import (
     LoginRequest,
     LoginResponse,
     MeResponse,
+    RegisterCodeRequest,
     RegisterRequest,
 )
 from .security import create_access_token, decode_access_token, hash_password, verify_password
@@ -45,6 +53,67 @@ _register_success_bucket: dict[str, list[float]] = defaultdict(list)
 _register_lock = Lock()
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+REGISTER_CODE_KEY = "register_code"
+SMTP_SETTING_KEY = "smtp"
+TURNSTILE_SETTING_KEY = "turnstile"
+
+DEFAULT_SMTP_CONFIG: dict = {
+    "host": "",
+    "port": 465,
+    "username": "",
+    "password": "",
+    "sender": "",
+    "sender_name": "",
+    "use_ssl": True,
+    "use_tls": False,
+    "code_ttl_seconds": 600,
+    "code_length": 6,
+    "per_email_window_seconds": 60,
+    "per_email_daily_limit": 5,
+}
+
+DEFAULT_TURNSTILE_CONFIG: dict = {
+    "site_key": "",
+    "secret_key": "",
+}
+
+
+def _load_json_setting(db: Session, key: str, default: dict) -> dict:
+    row = db.get(AppSetting, key)
+    if row is None or not row.value:
+        return dict(default)
+    try:
+        data = json.loads(row.value)
+    except Exception:
+        return dict(default)
+    if not isinstance(data, dict):
+        return dict(default)
+    merged = dict(default)
+    merged.update(data)
+    return merged
+
+
+def load_smtp_config(db: Session) -> dict:
+    return _load_json_setting(db, SMTP_SETTING_KEY, DEFAULT_SMTP_CONFIG)
+
+
+def load_turnstile_config(db: Session) -> dict:
+    return _load_json_setting(db, TURNSTILE_SETTING_KEY, DEFAULT_TURNSTILE_CONFIG)
+
+
+def get_register_code_ttl(cfg: dict) -> int:
+    try:
+        return max(60, int(cfg.get("code_ttl_seconds") or 600))
+    except Exception:
+        return 600
+
+
+def normalize_name(name: str) -> str:
+    value = str(name or "").strip()
+    if not value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid name")
+    return value[:64]
 
 
 def client_ip(req: Request) -> str:
@@ -127,6 +196,135 @@ def normalize_email(email: str) -> str:
     return value
 
 
+def code_hash(code: str) -> str:
+    return sha256(f"fms-register:{code}".encode("utf-8")).hexdigest()
+
+
+def generate_code(length: int = 6) -> str:
+    return "".join(str(randbelow(10)) for _ in range(max(4, min(length, 8))))
+
+
+def verify_turnstile(token: str, ip: str, db: Session) -> None:
+    cfg = load_turnstile_config(db)
+    secret_key = (cfg.get("secret_key") or "").strip()
+    if not secret_key:
+        return
+    try:
+        resp = httpx.post(
+            TURNSTILE_VERIFY_URL,
+            data={
+                "secret": secret_key,
+                "response": token,
+                "remoteip": ip,
+            },
+            timeout=15,
+        )
+        payload = resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"turnstile verify failed: {exc}") from exc
+    if not payload.get("success"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="turnstile verification failed")
+
+
+def smtp_ready(db: Session) -> bool:
+    cfg = load_smtp_config(db)
+    return bool(cfg.get("host") and cfg.get("username") and cfg.get("password") and cfg.get("sender"))
+
+
+def upsert_app_setting(db: Session, key: str, value: str) -> None:
+    row = db.get(AppSetting, key)
+    if row is None:
+        db.add(AppSetting(key=key, value=value))
+    else:
+        row.value = value
+    db.commit()
+
+
+def get_app_setting(db: Session, key: str) -> str:
+    row = db.get(AppSetting, key)
+    return row.value if row and row.value else ""
+
+
+def store_verification_code(db: Session, email: str, code: str, ip: str, ttl_seconds: int) -> None:
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    row = db.get(EmailVerificationCode, email)
+    if row is None:
+        db.add(
+            EmailVerificationCode(
+                email=email,
+                code_hash=code_hash(code),
+                expires_at=expires_at,
+                attempts=0,
+                sent_ip=ip,
+            )
+        )
+    else:
+        row.code_hash = code_hash(code)
+        row.expires_at = expires_at
+        row.attempts = 0
+        row.sent_ip = ip
+        row.used_at = None
+    db.commit()
+
+
+def send_verification_email(db: Session, recipient: str, code: str) -> None:
+    cfg = load_smtp_config(db)
+    ttl_seconds = get_register_code_ttl(cfg)
+    subject = "FMS 注册验证码"
+    text = f"你的注册验证码是 {code}，有效期 {ttl_seconds // 60} 分钟。"
+    html = f"""
+<div style="font-family:Segoe UI,Arial,sans-serif;padding:24px;background:#f5f7fb;color:#13233b">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:24px">
+    <h2 style="margin:0 0 12px;color:#1a73e8">FMS 注册验证码</h2>
+    <div style="font-size:32px;font-weight:700;letter-spacing:6px;background:#eef3fb;border-radius:10px;padding:14px 18px;text-align:center">{code}</div>
+    <p>有效期 {ttl_seconds // 60} 分钟。</p>
+  </div>
+</div>
+"""
+    log = EmailLog(recipient=recipient, subject=subject, purpose=REGISTER_CODE_KEY, success=False, error="", sent_by="system")
+    db.add(log)
+    db.commit()
+    if not (cfg.get("host") and cfg.get("username") and cfg.get("password") and cfg.get("sender")):
+        log.error = "smtp not configured"
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="smtp not configured")
+    host = cfg["host"]
+    port = int(cfg.get("port") or 465)
+    username = cfg["username"]
+    password = cfg["password"]
+    sender = cfg["sender"]
+    sender_name = cfg.get("sender_name") or ""
+    use_ssl = bool(cfg.get("use_ssl"))
+    use_tls = bool(cfg.get("use_tls"))
+    msg = EmailMessage()
+    msg["From"] = formataddr((sender_name, sender)) if sender else username
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg.set_content(text)
+    msg.add_alternative(html, subtype="html")
+    try:
+        if use_ssl:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, port, timeout=15, context=context) as client:
+                client.login(username, password)
+                client.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as client:
+                client.ehlo()
+                if use_tls:
+                    context = ssl.create_default_context()
+                    client.starttls(context=context)
+                    client.ehlo()
+                client.login(username, password)
+                client.send_message(msg)
+        log.success = True
+        db.commit()
+    except Exception as exc:
+        log.error = str(exc)[:1000]
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="email send failed") from exc
+
+
 def ensure_schema_compat() -> None:
     inspector = inspect(engine)
     if "users" not in inspector.get_table_names():
@@ -139,6 +337,12 @@ def ensure_schema_compat() -> None:
             conn.execute(text("CREATE UNIQUE INDEX uq_users_email ON users (email)"))
         except Exception:
             pass
+        if "app_settings" not in inspector.get_table_names():
+            conn.execute(text("CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(64) PRIMARY KEY, value TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)"))
+        if "email_log" not in inspector.get_table_names():
+            conn.execute(text("CREATE TABLE IF NOT EXISTS email_log (id INT PRIMARY KEY AUTO_INCREMENT, recipient VARCHAR(255) NOT NULL, subject VARCHAR(255) NOT NULL DEFAULT '', purpose VARCHAR(64) NOT NULL DEFAULT '', success BOOLEAN NOT NULL, error TEXT NOT NULL, sent_by VARCHAR(64) NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"))
+        if "email_verification_codes" not in inspector.get_table_names():
+            conn.execute(text("CREATE TABLE IF NOT EXISTS email_verification_codes (email VARCHAR(255) PRIMARY KEY, code_hash VARCHAR(128) NOT NULL, expires_at DATETIME NOT NULL, attempts INT NOT NULL DEFAULT 0, sent_ip VARCHAR(64) NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, used_at DATETIME NULL)"))
 
 
 def get_current_user(
@@ -165,25 +369,43 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-@app.on_event("startup")
-def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
-    ensure_schema_compat()
-    if not settings.admin_username or not settings.admin_password:
+def sync_config_admin(db: Session) -> None:
+    username = settings.admin_username.strip()
+    password = settings.admin_password
+    if not username or not password:
         return
-    with Session(engine) as db:
-        exists = db.scalar(select(User).where(User.username == settings.admin_username))
-        if exists:
-            return
+    user = db.scalar(select(User).where(User.username == username))
+    if user is None:
         db.add(
             User(
-                username=settings.admin_username,
-                password_hash=hash_password(settings.admin_password),
+                username=username,
+                password_hash=hash_password(password),
                 role="admin",
                 enabled=True,
             )
         )
         db.commit()
+        return
+    changed = False
+    if user.role != "admin":
+        user.role = "admin"
+        changed = True
+    if not user.enabled:
+        user.enabled = True
+        changed = True
+    if not verify_password(password, user.password_hash):
+        user.password_hash = hash_password(password)
+        changed = True
+    if changed:
+        db.commit()
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    Base.metadata.create_all(bind=engine)
+    ensure_schema_compat()
+    with Session(engine) as db:
+        sync_config_admin(db)
 
 
 @app.get("/healthz")
@@ -191,76 +413,30 @@ def healthz():
     return {"ok": True, "service": "fms-backup-auth"}
 
 
-@app.get("/register", response_class=HTMLResponse)
-def register_page():
-    return """
-<!doctype html><html><head><meta charset="utf-8"><title>Register</title>
-<style>body{font-family:Segoe UI;padding:24px;max-width:560px}input,button{width:100%;margin:6px 0;padding:10px}pre{background:#f5f5f5;padding:10px}</style>
-</head><body>
-<h2>用户注册</h2>
-<input id="username" placeholder="用户名">
-<input id="password" placeholder="密码" type="password">
-<button onclick="registerUser()">注册</button>
-<pre id="out"></pre>
-<script>
-const out = document.getElementById('out');
-async function registerUser(){
-  const payload={
-    username:document.getElementById('username').value.trim(),
-    password:document.getElementById('password').value
-  };
-  const r=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  out.textContent=await r.text();
-}
-</script></body></html>
-"""
+@app.get("/api/public/turnstile_site_key")
+def public_turnstile_site_key(db: Session = Depends(get_db)):
+    cfg = load_turnstile_config(db)
+    return {"site_key": (cfg.get("site_key") or "").strip()}
 
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin_page():
-    return """
-<!doctype html><html><head><meta charset="utf-8"><title>Admin</title>
-<style>body{font-family:Segoe UI;padding:24px;max-width:900px}input,button,select{margin:4px;padding:8px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px}pre{background:#f5f5f5;padding:10px}</style>
-</head><body>
-<h2>鍚庡彴绠＄悊</h2>
-<p>鍏堢櫥褰曟嬁 token锛屽啀绮樿创鍒颁笅闈€?/p>
-<input id="token" placeholder="Bearer token" style="width:100%">
-<button onclick="loadUsers()">鍒锋柊鐢ㄦ埛鍒楄〃</button>
-<h3>鏂板鐢ㄦ埛</h3>
-<input id="new_user" placeholder="鐢ㄦ埛鍚?><input id="new_email" placeholder="閭"><input id="new_pwd" placeholder="瀵嗙爜">
-<select id="new_role"><option value="user">user</option><option value="admin">admin</option></select>
-<button onclick="createUser()">鏂板</button>
-<h3>鐢ㄦ埛鍒楄〃</h3>
-<table id="tbl"><thead><tr><th>ID</th><th>鐢ㄦ埛鍚?/th><th>閭</th><th>瑙掕壊</th><th>鍚敤</th><th>鎿嶄綔</th></tr></thead><tbody></tbody></table>
-<pre id="out"></pre>
-<script>
-const out=document.getElementById('out');
-const tb=document.querySelector('#tbl tbody');
-function auth(){return {'Authorization':'Bearer '+document.getElementById('token').value.trim(),'Content-Type':'application/json'};}
-async function loadUsers(){
-  const r=await fetch('/api/admin/users',{headers:auth()}); const t=await r.text(); out.textContent=t;
-  if(!r.ok)return; const j=JSON.parse(t); tb.innerHTML='';
-  for(const u of j.users){
-    const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${u.id}</td><td>${u.username}</td><td>${u.email||''}</td><td>${u.role}</td><td>${u.enabled}</td>
-    <td><button onclick="delUser(${u.id})">鍒犻櫎</button><button onclick="chgPwd(${u.id})">鏀瑰瘑</button></td>`;
-    tb.appendChild(tr);
-  }
-}
-async function createUser(){
-  const p={username:new_user.value.trim(),email:new_email.value.trim()||null,password:new_pwd.value,role:new_role.value,enabled:true};
-  const r=await fetch('/api/admin/users',{method:'POST',headers:auth(),body:JSON.stringify(p)}); out.textContent=await r.text(); await loadUsers();
-}
-async function delUser(id){
-  const r=await fetch('/api/admin/users/'+id,{method:'DELETE',headers:auth()}); out.textContent=await r.text(); await loadUsers();
-}
-async function chgPwd(id){
-  const password=prompt('杈撳叆鏂板瘑鐮?); if(!password)return;
-  const r=await fetch('/api/admin/users/'+id+'/password',{method:'PATCH',headers:auth(),body:JSON.stringify({password})});
-  out.textContent=await r.text();
-}
-</script></body></html>
-"""
+
+@app.post("/api/auth/register/code")
+def register_code(body: RegisterCodeRequest, req: Request, db: Session = Depends(get_db)):
+    ip = client_ip(req)
+    allow_register_from_ip(ip)
+    name = normalize_name(body.name)
+    email = normalize_email(body.email)
+    verify_turnstile(body.turnstile_token, ip, db)
+    if db.scalar(select(User).where(User.username == name)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="name already exists")
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
+    code = generate_code(6)
+    smtp_cfg = load_smtp_config(db)
+    store_verification_code(db, email, code, ip, get_register_code_ttl(smtp_cfg))
+    send_verification_email(db, email, code)
+    return {"success": True, "message": "verification code sent"}
+
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
@@ -291,12 +467,28 @@ def login(body: LoginRequest, req: Request, db: Session = Depends(get_db)):
 def register(body: RegisterRequest, req: Request, db: Session = Depends(get_db)):
     ip = client_ip(req)
     allow_register_from_ip(ip)
-    username = body.username.strip()
-    if not username:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid username")
-    if db.scalar(select(User).where(User.username == username)):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="username already exists")
-    db.add(User(username=username, email=None, password_hash=hash_password(body.password), role="user", enabled=True))
+    name = normalize_name(body.name)
+    email = normalize_email(body.email)
+    verify_turnstile(body.turnstile_token, ip, db)
+    if db.scalar(select(User).where(User.username == name)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="name already exists")
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
+    code_row = db.get(EmailVerificationCode, email)
+    if code_row is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="verification code not found")
+    if code_row.used_at is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="verification code already used")
+    if code_row.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="verification code expired")
+    if code_row.attempts >= 5:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="too many verification attempts")
+    if code_row.code_hash != code_hash(body.email_code.strip()):
+        code_row.attempts += 1
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid verification code")
+    code_row.used_at = datetime.now(timezone.utc)
+    db.add(User(username=name, email=email, password_hash=hash_password(body.password), role="user", enabled=True))
     db.commit()
     record_register_success(ip)
     return {"success": True, "message": "register ok"}
