@@ -1,0 +1,49 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="FMS UPDATE MANAGER"
+           Manufacturer="CNRPG"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="3EFC6484-8AD8-4D4E-BFAA-4ED17A58B5A6"
+           Language="1033">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="D:\HugoMoveData\User\16832\Desktop\FMS UPDATE MANAGER\assets\travel_airplane.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <util:CloseApplication Id="RequireAppClosed" Target="FMS_UPDATE_MANAGER.exe" Description="Detected FMS UPDATE MANAGER is running. Please close it before continuing installation." PromptToContinue="yes" CloseMessage="yes" RebootPrompt="no" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="FMS UPDATE MANAGER" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="FMS UPDATE MANAGER" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="StartMenuShortcutComponents" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="FMS UPDATE MANAGER" />
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="StartMenuShortcutComponents">
+      <Component Id="StartMenuShortcutComponent" Directory="ProgramMenuDir" Guid="A1B2C3D4-1505-4E5F-9A0B-1F2E3D4C5B6A">
+        <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuDir" Name="FMS UPDATE MANAGER" Description="FMS UPDATE MANAGER" Icon="AppIcon" WorkingDirectory="INSTALLFOLDER" Target="[INSTALLFOLDER]FMS_UPDATE_MANAGER.exe" />
+        <RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="Software\CNRPG\FMS UPDATE MANAGER" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.SourceDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

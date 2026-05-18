@@ -1,0 +1,21 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="FMS UPDATE MANAGER Beta"
+           Manufacturer="CNRPG"
+           Version="1.0.4"
+           UpgradeCode="3EFC6484-8AD8-4D4E-BFAA-4ED17A58B5A6"
+           Language="1033">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="FMS UPDATE MANAGER Beta" />
+    </StandardDirectory>
+    <Feature Id="MainFeature" Title="FMS UPDATE MANAGER Beta" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+  </Package>
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="D:\HugoMoveData\User\16832\Desktop\FMS UPDATE MANAGER\dist_test\FMS_UPDATE_MANAGER\**" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

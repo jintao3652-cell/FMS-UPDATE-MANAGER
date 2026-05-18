@@ -1,0 +1,97 @@
+services:
+  db:
+    image: mysql:8.4
+    restart: always
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MYSQL_USER} -p${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  auth_api:
+    build: ./backup_auth
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_DB_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}?charset=utf8mb4
+      APP_JWT_SECRET: ${APP_JWT_SECRET}
+      APP_JWT_EXPIRE_MINUTES: ${APP_JWT_EXPIRE_MINUTES}
+      APP_REFRESH_TOKEN_EXPIRE_DAYS: ${APP_REFRESH_TOKEN_EXPIRE_DAYS:-30}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS}
+      APP_REGISTER_ATTEMPT_LIMIT: ${APP_REGISTER_ATTEMPT_LIMIT}
+      APP_REGISTER_ATTEMPT_WINDOW_SECONDS: ${APP_REGISTER_ATTEMPT_WINDOW_SECONDS}
+      APP_REGISTER_PER_IP_LIMIT: ${APP_REGISTER_PER_IP_LIMIT}
+      APP_REGISTER_PER_IP_WINDOW_SECONDS: ${APP_REGISTER_PER_IP_WINDOW_SECONDS}
+      APP_OPENLIST_BASE_URL: ${APP_OPENLIST_BASE_URL:-http://main.cnrpg.top:5245}
+      APP_OPENLIST_USERNAME: ${APP_OPENLIST_USERNAME:-navdata}
+      APP_OPENLIST_PASSWORD: ${APP_OPENLIST_PASSWORD:-navdata}
+      APP_CYCLE_CHECK_INTERVAL_SECONDS: ${APP_CYCLE_CHECK_INTERVAL_SECONDS:-3600}
+    ports:
+      - "17306:17306"
+
+  admin_panel:
+    build: ./admin_panel
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      auth_api:
+        condition: service_started
+    environment:
+      APP_DB_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}?charset=utf8mb4
+      APP_JWT_SECRET: ${APP_JWT_SECRET}
+      APP_JWT_EXPIRE_MINUTES: ${APP_JWT_EXPIRE_MINUTES}
+      APP_REFRESH_TOKEN_EXPIRE_DAYS: ${APP_REFRESH_TOKEN_EXPIRE_DAYS:-30}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS}
+      APP_ADMIN_PORT: ${APP_ADMIN_PORT:-1145}
+      APP_OPENLIST_BASE_URL: ${APP_OPENLIST_BASE_URL:-http://main.cnrpg.top:5245}
+      APP_OPENLIST_USERNAME: ${APP_OPENLIST_USERNAME:-navdata}
+      APP_OPENLIST_PASSWORD: ${APP_OPENLIST_PASSWORD:-navdata}
+    ports:
+      - "${APP_ADMIN_PORT:-1145}:1145"
+
+  register_ui:
+    build: ./register_ui
+    restart: always
+    depends_on:
+      auth_api:
+        condition: service_started
+    environment:
+      APP_AUTH_API_URL: http://auth_api:17306
+      APP_REGISTER_PUBLIC_AUTH_URL: ${APP_REGISTER_PUBLIC_AUTH_URL}
+    ports:
+      - "3090:3090"
+
+  backup:
+    build: ./backup
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: db
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-30}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-19}
+      BACKUP_ON_START: ${BACKUP_ON_START:-0}
+    volumes:
+      - ${BACKUP_HOST_DIR:-./_backups}:/backups
+
+volumes:
+  mysql_data:
