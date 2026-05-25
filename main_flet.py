@@ -223,6 +223,7 @@ from maintenance import (
 )
 
 from crash_report import install_crash_handlers, list_recent_crash_logs, report_exception
+from i18n import tr as _
 
 ft.context.disable_auto_update()
 
@@ -242,6 +243,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     state = load_state()
     state.setdefault("crash_upload_enabled", False)
+    state.setdefault("locale", "zh")
+    from i18n import set_locale as _set_locale
+    _set_locale(state.get("locale") or "zh")
     install_crash_handlers(state_getter=lambda: state)
     if not isinstance(state.get("addons"), list) or not state.get("addons"):
         state["addons"] = default_addons()
@@ -375,14 +379,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         pass
 
     airac_id_text = ft.Text("----", size=fs(34), weight=ft.FontWeight.BOLD, color=colors["cycle_big"])
-    airac_effective_text = ft.Text("本期数据生效日期：--", size=fs(12), color=colors["text_sub"])
-    airac_next_text = ft.Text("本期数据将于--月--日到期", size=fs(12), color=colors["text_sub"])
+    airac_effective_text = ft.Text(_("本期数据生效日期：--"), size=fs(12), color=colors["text_sub"])
+    airac_next_text = ft.Text(_("本期数据将于--月--日到期"), size=fs(12), color=colors["text_sub"])
 
     left_list = ft.ListView(expand=True, spacing=6)
     right_cards_list = ft.Column(expand=True, spacing=10)
     log_list = ft.ListView(height=52, spacing=2, auto_scroll=True)
     log_overlay_list = ft.ListView(expand=True, spacing=6, auto_scroll=True)
-    log_overlay_title = ft.Text("活动日志", size=fs(24), weight=ft.FontWeight.BOLD, color=colors["text_title"])
+    log_overlay_title = ft.Text(_("活动日志"), size=fs(24), weight=ft.FontWeight.BOLD, color=colors["text_title"])
     log_overlay_container = ft.Container(visible=False)
     custom_modal_title = ft.Text("", size=fs(22), weight=ft.FontWeight.BOLD, color=colors["text_title"])
     custom_modal_body = ft.Column(tight=True, spacing=10, scroll=ft.ScrollMode.AUTO)
@@ -393,7 +397,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     install_overlay_scroll_pending = False
     install_overlay_last_update_ts = 0.0
     install_overlay_update_interval = 0.25
-    install_overlay_title_text = "安装状态"
+    install_overlay_title_text = _("安装状态")
     install_overlay_title = ft.Text(install_overlay_title_text, size=fs(24), weight=ft.FontWeight.BOLD, color=colors["text_title"])
     install_overlay_container = ft.Container(visible=False)
     pending_force_install_action: Callable[[], None] | None = None
@@ -407,7 +411,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     op_dialog_status = ft.Text("", size=fs(13), selectable=True)
     op_dialog_detail = ft.Text("", size=fs(12), color=colors["text_sub"], selectable=True)
     op_overlay_container = ft.Container(visible=False)
-    op_hide_button = ft.TextButton("返回")
+    op_hide_button = ft.TextButton(_("返回"))
     backup_power_login_valid = False
     one_click_install_filter_button: ft.Button | None = None
     backup_power_login_button: ft.Button | None = None
@@ -420,8 +424,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     startup_update_check_skip = False
     startup_update_release_url = ""
     startup_update_overlay_container = ft.Container(visible=False)
-    startup_update_title = ft.Text("启动检查更新", size=fs(22), weight=ft.FontWeight.BOLD, color=colors["text_title"])
-    startup_update_status = ft.Text("准备检查 GitHub Releases...", size=fs(14), color=colors["text_sub"])
+    startup_update_title = ft.Text(_("启动检查更新"), size=fs(22), weight=ft.FontWeight.BOLD, color=colors["text_title"])
+    startup_update_status = ft.Text(_("准备检查 GitHub Releases..."), size=fs(14), color=colors["text_sub"])
     startup_update_detail = ft.Text("", size=fs(12), color=colors["text_meta"], selectable=True)
     startup_update_countdown = ft.Text("", size=fs(12), color=colors["text_meta"])
     startup_update_skip_btn: ft.Button | None = None
@@ -452,8 +456,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if state.get("community_setup_done", False) and (has20 or has24) and ready20 and ready24:
             return True
 
-        has20_check = ft.Checkbox(label="我有 MSFS 2020", value=has20)
-        has24_check = ft.Checkbox(label="我有 MSFS 2024", value=has24)
+        has20_check = ft.Checkbox(label=_("我有 MSFS 2020"), value=has20)
+        has24_check = ft.Checkbox(label=_("我有 MSFS 2024"), value=has24)
         fs20_field = ft.TextField(
             label="FS20 Community",
             value=cur20 or default_community_base("MSFS 2020", platform),
@@ -471,9 +475,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             expand=True,
         )
         setup_error_text = ft.Text("", size=fs(12), color="#b83d4b")
-        browse20_btn = ft.Button("浏览")
-        browse24_btn = ft.Button("浏览")
-        browse24_extra_btn = ft.Button("浏览")
+        browse20_btn = ft.Button(_("浏览"))
+        browse24_btn = ft.Button(_("浏览"))
+        browse24_extra_btn = ft.Button(_("浏览"))
 
         for ctrl in list(page.services):
             if isinstance(ctrl, ft.FilePicker) and getattr(ctrl, "data", None) in {"community_picker_20", "community_picker_24", "community_picker_24_extra"}:
@@ -492,12 +496,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         def browse_fs20(_e) -> None:
             async def runner() -> None:
                 try:
-                    path = await picker20.get_directory_path(dialog_title="选择 FS20 Community")
+                    path = await picker20.get_directory_path(dialog_title=_("选择 FS20 Community"))
                     if path:
                         fs20_field.value = path
                         page.update()
                 except Exception as exc:
-                    setup_error_text.value = f"选择目录失败: {exc}"
+                    setup_error_text.value = _("选择目录失败: {exc}", exc=exc)
                     page.update()
 
             page.run_task(runner)
@@ -505,12 +509,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         def browse_fs24(_e) -> None:
             async def runner() -> None:
                 try:
-                    path = await picker24.get_directory_path(dialog_title="选择 FS24 Community")
+                    path = await picker24.get_directory_path(dialog_title=_("选择 FS24 Community"))
                     if path:
                         fs24_field.value = path
                         page.update()
                 except Exception as exc:
-                    setup_error_text.value = f"选择目录失败: {exc}"
+                    setup_error_text.value = _("选择目录失败: {exc}", exc=exc)
                     page.update()
 
             page.run_task(runner)
@@ -518,12 +522,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         def browse_fs24_extra(_e) -> None:
             async def runner() -> None:
                 try:
-                    path = await picker24_extra.get_directory_path(dialog_title="选择 FS24 Community2024")
+                    path = await picker24_extra.get_directory_path(dialog_title=_("选择 FS24 Community2024"))
                     if path:
                         fs24_extra_field.value = path
                         page.update()
                 except Exception as exc:
-                    setup_error_text.value = f"选择目录失败: {exc}"
+                    setup_error_text.value = _("选择目录失败: {exc}", exc=exc)
                     page.update()
 
             page.run_task(runner)
@@ -554,19 +558,19 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             has20_selected = bool(has20_check.value)
             has24_selected = bool(has24_check.value)
             if not has20_selected and not has24_selected:
-                setup_error_text.value = "至少需要选择一个模拟器（MSFS 2020 或 MSFS 2024）。"
+                setup_error_text.value = _("至少需要选择一个模拟器（MSFS 2020 或 MSFS 2024）。")
                 page.update()
                 return
             if has20_selected and not is_valid_community_path(p20):
-                setup_error_text.value = "MSFS 2020 已启用，请填写有效的 FS20 Community 路径（目录名需为 Community）。"
+                setup_error_text.value = _("MSFS 2020 已启用，请填写有效的 FS20 Community 路径（目录名需为 Community）。")
                 page.update()
                 return
             if has24_selected and not is_valid_community_path(p24):
-                setup_error_text.value = "MSFS 2024 已启用，请填写有效的 FS24 Community 路径（目录名需为 Community）。"
+                setup_error_text.value = _("MSFS 2024 已启用，请填写有效的 FS24 Community 路径（目录名需为 Community）。")
                 page.update()
                 return
             if has24_selected and not is_valid_community2024_path(p24_extra):
-                setup_error_text.value = "MSFS 2024 已启用，请填写有效的 FS24 Community2024 路径（目录名需为 Community2024 或 Community）。"
+                setup_error_text.value = _("MSFS 2024 已启用，请填写有效的 FS24 Community2024 路径（目录名需为 Community2024 或 Community）。")
                 page.update()
                 return
             setup_error_text.value = ""
@@ -597,9 +601,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         tight=True,
                         spacing=16,
                         controls=[
-                            ft.Text("首次设置 Community 路径", size=fs(26), weight=ft.FontWeight.BOLD, color=colors["text_title"]),
+                            ft.Text(_("首次设置 Community 路径"), size=fs(26), weight=ft.FontWeight.BOLD, color=colors["text_title"]),
                             ft.Text(
-                                f"当前平台: {platform}\n请先选择你拥有的模拟器，再填写对应路径。",
+                                _("当前平台: {platform}\n请先选择你拥有的模拟器，再填写对应路径。", platform=platform),
                                 size=fs(13),
                                 color=colors["text_sub"],
                             ),
@@ -626,7 +630,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 ],
                             ),
                             ft.Text(
-                                "要求：目录必须真实存在；FS20/FS24 路径末级需为 Community，FS24 Community2024 路径末级需为 Community2024 或 Community。",
+                                _("要求：目录必须真实存在；FS20/FS24 路径末级需为 Community，FS24 Community2024 路径末级需为 Community2024 或 Community。"),
                                 size=fs(12),
                                 color=colors["text_meta"],
                             ),
@@ -635,7 +639,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 alignment=ft.MainAxisAlignment.END,
                                 controls=[
                                     ft.Button(
-                                        "保存并继续",
+                                        _("保存并继续"),
                                         on_click=save_community_paths,
                                         bgcolor="#1a73e8",
                                         color="#ffffff",
@@ -702,7 +706,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         platform_segment_row.controls.append(platform_buttons[option])
 
     theme_segment_row = ft.Row(spacing=4)
-    theme_labels = {THEME_LIGHT: "白色", THEME_DARK: "黑色"}
+    theme_labels = {THEME_LIGHT: _("白色"), THEME_DARK: _("黑色")}
     for option in (THEME_LIGHT, THEME_DARK):
         theme_buttons[option] = build_segment_button(theme_labels[option], lambda v=option: set_theme(v))
         theme_segment_row.controls.append(theme_buttons[option])
@@ -936,7 +940,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         nonlocal startup_update_check_skip
         startup_update_check_skip = True
         close_startup_update_overlay()
-        log("启动更新检查: 用户点击跳过。")
+        log(_("启动更新检查: 用户点击跳过。"))
 
     def on_startup_update_download(_e=None) -> None:
         nonlocal startup_update_check_skip
@@ -944,13 +948,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             open_external_url(startup_update_release_url)
         startup_update_check_skip = True
         close_startup_update_overlay()
-        log(f"启动更新检查: 打开发布页 {startup_update_release_url}")
+        log(_("启动更新检查: 打开发布页 {startup_update_release_url}", startup_update_release_url=startup_update_release_url))
 
     def on_startup_update_continue(_e=None) -> None:
         nonlocal startup_update_check_skip
         startup_update_check_skip = True
         close_startup_update_overlay()
-        log("启动更新检查: 用户继续进入主界面。")
+        log(_("启动更新检查: 用户继续进入主界面。"))
 
     async def run_startup_update_check() -> None:
         nonlocal startup_update_check_skip, startup_update_release_url
@@ -958,8 +962,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         repo = normalize_github_repo(GITHUB_RELEASE_REPO)
         startup_update_release_url = f"https://github.com/{repo}/releases/latest"
         set_startup_update_overlay(
-            "正在检查更新...",
-            f"正在访问 GitHub Releases: {repo}",
+            _("正在检查更新..."),
+            _("正在访问 GitHub Releases: {repo}", repo=repo),
             show_skip=False,
             show_download=False,
             show_continue=False,
@@ -972,14 +976,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         try:
             release = check_task.result()
         except Exception as exc:
-            log(f"GitHub 更新检查失败: {exc}")
+            log(_("GitHub 更新检查失败: {exc}", exc=exc))
             expand_window_for_update_notice()
-            failure_message = "与 GitHub 通信失败，已允许继续使用。"
+            failure_message = _("与 GitHub 通信失败，已允许继续使用。")
             for remain in range(3, 0, -1):
                 set_startup_update_overlay(
-                    "更新检查失败",
+                    _("更新检查失败"),
                     failure_message,
-                    countdown_text=f"{remain} 秒后自动进入主界面",
+                    countdown_text=_("{remain} 秒后自动进入主界面", remain=remain),
                     show_skip=False,
                     show_download=False,
                     show_continue=False,
@@ -1016,9 +1020,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             return
 
         set_startup_update_overlay(
-            "已是最新版本。",
-            f"当前版本: {current_version_label}",
-            countdown_text="即将进入主界面...",
+            _("已是最新版本。"),
+            _("当前版本: {current_version_label}", current_version_label=current_version_label),
+            countdown_text=_("即将进入主界面..."),
             show_skip=False,
             show_download=False,
             show_continue=False,
@@ -1035,7 +1039,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             f"发布页: {release_url}"
         )
         set_startup_update_overlay(
-            "发现新版本，需升级后才能使用。",
+            _("发现新版本，需升级后才能使用。"),
             detail,
             show_skip=False,
             show_download=False,
@@ -1043,10 +1047,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         )
 
         if not msi_url:
-            log(f"未在 release 中找到 MSI 资产，无法自动升级；用户需手动下载: {release_url}")
+            log(_("未在 release 中找到 MSI 资产，无法自动升级；用户需手动下载: {release_url}", release_url=release_url))
             set_startup_update_overlay(
-                "未找到自动升级包",
-                detail + "\n\n未在 Release 中找到 .msi 安装包，请到发布页手动下载安装。",
+                _("未找到自动升级包"),
+                detail + _("\n\n未在 Release 中找到 .msi 安装包，请到发布页手动下载安装。"),
                 show_skip=False,
                 show_download=True,
                 show_continue=False,
@@ -1063,8 +1067,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             msi_path = tmp_dir / Path(msi_url).name
             part_path = tmp_dir / (msi_path.name + ".part")
             set_startup_update_overlay(
-                "正在下载更新包...",
-                detail + f"\n\n下载到: {msi_path}",
+                _("正在下载更新包..."),
+                detail + _("\n\n下载到: {msi_path}", msi_path=msi_path),
                 show_skip=False,
                 show_download=False,
                 show_continue=False,
@@ -1104,10 +1108,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
             await asyncio.to_thread(_download)
         except Exception as exc:
-            log(f"下载 MSI 失败: {exc}")
+            log(_("下载 MSI 失败: {exc}", exc=exc))
             set_startup_update_overlay(
-                "更新包下载失败",
-                detail + f"\n\n下载异常: {exc}\n请到发布页手动下载安装。",
+                _("更新包下载失败"),
+                detail + _("\n\n下载异常: {exc}\n请到发布页手动下载安装。", exc=exc),
                 show_skip=False,
                 show_download=True,
                 show_continue=False,
@@ -1117,8 +1121,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             return
 
         set_startup_update_overlay(
-            "正在校验更新包签名...",
-            detail + "\n\n正在校验 Authenticode 数字签名。",
+            _("正在校验更新包签名..."),
+            detail + _("\n\n正在校验 Authenticode 数字签名。"),
             show_skip=False,
             show_download=False,
             show_continue=False,
@@ -1174,10 +1178,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
         ok, msg = await asyncio.to_thread(_verify_msi_signature, msi_path)
         if not ok:
-            log(f"MSI 签名校验失败: {msg}")
+            log(_("MSI 签名校验失败: {msg}", msg=msg))
             set_startup_update_overlay(
-                "更新包签名校验失败",
-                detail + f"\n\n校验信息: {msg}\n为安全起见已停止安装，请到发布页手动下载并核对签名。",
+                _("更新包签名校验失败"),
+                detail + _("\n\n校验信息: {msg}\n为安全起见已停止安装，请到发布页手动下载并核对签名。", msg=msg),
                 show_skip=False,
                 show_download=True,
                 show_continue=False,
@@ -1189,11 +1193,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             while True:
                 await asyncio.sleep(1)
             return
-        log(f"MSI 签名校验通过: {msg}")
+        log(_("MSI 签名校验通过: {msg}", msg=msg))
 
         set_startup_update_overlay(
-            "正在启动安装程序...",
-            detail + "\n\n安装程序已启动，本程序即将退出。",
+            _("正在启动安装程序..."),
+            detail + _("\n\n安装程序已启动，本程序即将退出。"),
             show_skip=False,
             show_download=False,
             show_continue=False,
@@ -1201,11 +1205,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         try:
             subprocess.Popen(["msiexec", "/i", str(msi_path)], shell=False)
         except Exception as exc:
-            log(f"启动 msiexec 失败: {exc}")
+            log(_("启动 msiexec 失败: {exc}", exc=exc))
             try:
                 os.startfile(str(msi_path))
             except Exception as exc2:
-                log(f"os.startfile 失败: {exc2}")
+                log(_("os.startfile 失败: {exc2}", exc2=exc2))
         await asyncio.sleep(1.5)
         try:
             page.window.close()
@@ -1221,15 +1225,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         nonlocal op_dialog, op_dialog_suppressed
         op_dialog_title.value = title
         op_dialog_status.value = status
-        op_dialog_detail.value = detail or "请稍候，任务正在执行中。"
+        op_dialog_detail.value = detail or _("请稍候，任务正在执行中。")
 
         def hide_click(_e=None) -> None:
             nonlocal op_dialog_suppressed
             op_dialog_suppressed = True
-            log("处理中弹窗: 点击返回")
+            log(_("处理中弹窗: 点击返回"))
             op_overlay_container.visible = False
             update_controls(op_overlay_container)
-            snack("已返回主界面，任务仍在后台执行。")
+            snack(_("已返回主界面，任务仍在后台执行。"))
 
         if op_dialog_suppressed:
             return
@@ -1241,7 +1245,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if op_dialog_suppressed:
             return
         if not op_overlay_container.visible:
-            show_operation_dialog("处理中", status, detail)
+            show_operation_dialog(_("处理中"), status, detail)
             return
         op_dialog_status.value = status
         if detail:
@@ -1296,7 +1300,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             try:
                 on_yes()
             except Exception as exc:
-                snack(f"确认操作失败: {exc}")
+                snack(_("确认操作失败: {exc}", exc=exc))
 
         def no_click(_e) -> None:
             close_dialog()
@@ -1311,8 +1315,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             title=ft.Text(title),
             content=ft.Text(message, selectable=True),
             actions=[
-                ft.TextButton("取消", on_click=no_click),
-                ft.TextButton("继续", on_click=yes_click),
+                ft.TextButton(_("取消"), on_click=no_click),
+                ft.TextButton(_("继续"), on_click=yes_click),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
@@ -1394,7 +1398,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             try:
                 picked_path = await picker.get_directory_path(dialog_title=f"选择 {addon.name} 导航数据目录")
             except Exception as exc:
-                snack(f"打开目录选择窗口失败: {exc}")
+                snack(_("打开目录选择窗口失败: {exc}", exc=exc))
                 finish_result(None)
                 return
             if not picked_path:
@@ -1402,7 +1406,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 return
             target_dir = Path(str(picked_path).strip())
             if not target_dir.exists() or not target_dir.is_dir():
-                snack(f"目录不存在或不可用: {target_dir}")
+                snack(_("目录不存在或不可用: {target_dir}", target_dir=target_dir))
                 finish_result(None)
                 return
             persist_addon_target_path(addon, target_dir)
@@ -1416,7 +1420,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             finish_result(None)
 
         show_confirm_dialog(
-            "未检测到安装目录",
+            _("未检测到安装目录"),
             (
                 f"{addon.name} 未检测到可用导航数据目录。\n"
                 "请点击“继续”手动选择已安装机模的导航数据目录。"
@@ -1450,12 +1454,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             try:
                 required = sim_base_navdata_required_subfolders(addon)
                 if not required:
-                    raise ValueError("机型未配置必需的导航数据子目录列表")
+                    raise ValueError(_("机型未配置必需的导航数据子目录列表"))
                 if progress_callback is not None:
-                    progress_callback("正在解压压缩包...")
+                    progress_callback(_("正在解压压缩包..."))
                 extracted_root = extract_archive_to_temp(archive_path, progress_callback=progress_callback)
                 if progress_callback is not None:
-                    progress_callback("正在校验压缩包结构...")
+                    progress_callback(_("正在校验压缩包结构..."))
                 payload_info = inspect_sim_base_payload(extracted_root, required)
                 if not payload_info:
                     raise ValueError(
@@ -1464,7 +1468,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 payload_dir = Path(str(payload_info.get("payload_dir", "")).strip())
                 install_base = target
                 if not install_base.exists() or not install_base.is_dir():
-                    raise ValueError(f"Community 目录不可用: {install_base}")
+                    raise ValueError(_("Community 目录不可用: {install_base}", install_base=install_base))
 
                 backup_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 safe_name = addon.name.replace("/", "_").replace("\\", "_")
@@ -1481,17 +1485,17 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 src = entry
                                 break
                     if not src.exists() or not src.is_dir():
-                        raise ValueError(f"压缩包缺少子目录: {sub}")
+                        raise ValueError(_("压缩包缺少子目录: {sub}", sub=sub))
                     dest = install_base / sub
                     if dest.exists():
                         if progress_callback is not None:
-                            progress_callback(f"备份旧 {sub}...")
+                            progress_callback(_("备份旧 {sub}...", sub=sub))
                         backup_path.mkdir(parents=True, exist_ok=True)
                         shutil.copytree(dest, backup_path / sub, dirs_exist_ok=True)
                         backed_up = True
                         shutil.rmtree(dest, ignore_errors=True)
                     if progress_callback is not None:
-                        progress_callback(f"安装 {sub}...")
+                        progress_callback(_("安装 {sub}...", sub=sub))
                     shutil.copytree(src, dest)
                     copied_files += sum(1 for _ in dest.rglob("*") if _.is_file())
 
@@ -1517,24 +1521,24 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             payload_dir: Path | None = None
             if archive_kind == "zip":
                 if progress_callback is not None:
-                    progress_callback("正在分析 ZIP 安装载荷...")
+                    progress_callback(_("正在分析 ZIP 安装载荷..."))
                 archive_payload = inspect_zip_cycle_payload(archive_path)
                 if not archive_payload:
-                    raise ValueError("压缩包中未找到可用 cycle.json，无法安装")
+                    raise ValueError(_("压缩包中未找到可用 cycle.json，无法安装"))
                 payload_prefix = str(archive_payload.get("payload_prefix", "")).strip()
                 payload_airac = detect_airac(str(archive_payload.get("airac", "UNKNOWN")))
             else:
                 if progress_callback is not None:
-                    progress_callback("正在解压压缩包主体文件...")
+                    progress_callback(_("正在解压压缩包主体文件..."))
                 extracted_root = extract_archive_to_temp(archive_path, progress_callback=progress_callback)
                 if progress_callback is not None:
-                    progress_callback("正在定位安装载荷...")
+                    progress_callback(_("正在定位安装载荷..."))
                 archive_payload = inspect_extracted_cycle_payload(extracted_root)
                 if not archive_payload:
-                    raise ValueError("压缩包中未找到可用 cycle.json，无法安装")
+                    raise ValueError(_("压缩包中未找到可用 cycle.json，无法安装"))
                 payload_dir = Path(str(archive_payload.get("payload_dir", "")).strip())
                 if not payload_dir.exists() or not payload_dir.is_dir():
-                    raise ValueError(f"无效安装载荷目录: {payload_dir}")
+                    raise ValueError(_("无效安装载荷目录: {payload_dir}", payload_dir=payload_dir))
                 payload_airac = detect_airac(str(archive_payload.get("airac", "UNKNOWN")))
 
             install_base = target
@@ -1548,14 +1552,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             backup_path: Path | None = None
             if install_base.exists():
                 if progress_callback is not None:
-                    progress_callback("备份现有导航数据...")
+                    progress_callback(_("备份现有导航数据..."))
                 addon_backup_root = BACKUP_DIR / safe_name
                 addon_backup_root.mkdir(parents=True, exist_ok=True)
                 backup_path = addon_backup_root / backup_stamp
                 shutil.copytree(install_base, backup_path, dirs_exist_ok=True)
 
                 if progress_callback is not None:
-                    progress_callback("清理旧文件...")
+                    progress_callback(_("清理旧文件..."))
                 for child in install_base.iterdir():
                     if child.is_dir():
                         shutil.rmtree(child)
@@ -1564,11 +1568,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             else:
                 install_base.mkdir(parents=True, exist_ok=True)
                 if progress_callback is not None:
-                    progress_callback("创建安装目录...")
+                    progress_callback(_("创建安装目录..."))
 
             effective_airac = archive_airac if archive_airac != "UNKNOWN" else payload_airac
             if progress_callback is not None:
-                progress_callback("复制新导航数据文件...")
+                progress_callback(_("复制新导航数据文件..."))
             if archive_kind == "zip":
                 extracted_files, install_root = extract_zip_payload_to_target(
                     addon=addon,
@@ -1579,7 +1583,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 )
             else:
                 if payload_dir is None:
-                    raise ValueError("安装载荷目录无效。")
+                    raise ValueError(_("安装载荷目录无效。"))
                 extracted_files, install_root = copy_payload_dir_to_target(
                     addon=addon,
                     payload_dir=payload_dir,
@@ -1594,7 +1598,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 airac = read_cycle_from_dir(install_base)
             (install_base / "airac.txt").write_text(f"AIRAC {airac}\n", encoding="utf-8")
             if progress_callback is not None:
-                progress_callback(f"安装完成: AIRAC {airac}")
+                progress_callback(_("安装完成: AIRAC {airac}", airac=airac))
             return {
                 "backup_path": str(backup_path) if backup_path else "",
                 "airac": airac,
@@ -1625,7 +1629,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 open_install_overlay(title=f"安装状态 - {addon.name}", reset=False)
                 log(f"{addon.name}: begin install from archive '{archive_name}'")
                 append_install_overlay_line(f"开始安装机型: {addon.name}")
-                append_install_overlay_line(f"来源压缩包: {archive_name}")
+                append_install_overlay_line(_("来源压缩包: {archive_name}", archive_name=archive_name))
                 result = await run_blocking_with_feedback(
                     perform_archive_update_install,
                     addon,
@@ -1647,13 +1651,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     append_install_overlay_line(f"已备份旧数据: {result['backup_path']}")
                 else:
                     log(f"{addon.name}: no existing data, install performed without backup")
-                    append_install_overlay_line("未检测到旧数据，已执行全新安装")
+                    append_install_overlay_line(_("未检测到旧数据，已执行全新安装"))
                 log(
                     f"{addon.name}: updated to AIRAC {result['airac']} "
                     f"({result['extracted_files']} file(s) installed) from {result['archive_name']}"
                 )
                 archive_cycle_msg = (
-                    f"导航数据更新成功，当前安装的 AIRAC 周期: {archive_airac}（来自压缩包 cycle.json）"
+                    _("导航数据更新成功，当前安装的 AIRAC 周期: {archive_airac}（来自压缩包 cycle.json）", archive_airac=archive_airac)
                     if archive_airac != "UNKNOWN"
                     else f"导航数据更新成功，但 cycle.json 未提供 AIRAC，当前周期: {result['airac']}"
                 )
@@ -1662,7 +1666,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     "navigraph-msfs2024-base",
                 }
                 if is_base_navdata:
-                    archive_cycle_msg = "安装完成"
+                    archive_cycle_msg = _("安装完成")
                 append_install_overlay_line(archive_cycle_msg)
                 if show_result_dialog:
                     if is_base_navdata:
@@ -1672,12 +1676,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 if show_result_dialog:
                     if is_base_navdata:
                         show_info_dialog(
-                            "安装完成",
+                            _("安装完成"),
                             f"{addon.name} 安装完成。\n安装文件数: {result['extracted_files']}",
                         )
                     else:
                         show_info_dialog(
-                            "更新完成",
+                            _("更新完成"),
                             (
                                 f"{addon.name} 已更新到 AIRAC {result['airac']}。\n"
                                 f"安装文件数: {result['extracted_files']}\n"
@@ -1687,11 +1691,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         )
                 return True
             except Exception as exc:
-                append_install_overlay_line(f"安装失败: {exc}")
+                append_install_overlay_line(_("安装失败: {exc}", exc=exc))
                 if show_result_dialog:
                     snack(f"{addon.name} 更新失败: {exc}")
                 if show_result_dialog:
-                    show_info_dialog("更新失败", f"{addon.name} 更新失败。\n\n错误详情：{exc}")
+                    show_info_dialog(_("更新失败"), f"{addon.name} 更新失败。\n\n错误详情：{exc}")
                 return False
             finally:
                 await asyncio.to_thread(cleanup_backup_power_download_cache, state)
@@ -1730,11 +1734,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         selected_file = files[0]
         file_path = getattr(selected_file, "path", None)
         if not file_path:
-            snack("未获取到压缩包路径")
+            snack(_("未获取到压缩包路径"))
             return False
         archive_path = Path(file_path)
         if not archive_path.exists():
-            snack(f"压缩包不存在: {archive_path}")
+            snack(_("压缩包不存在: {archive_path}", archive_path=archive_path))
             return False
         if not is_supported_archive_file(archive_path):
             snack(f"不支持的压缩格式: {archive_path.name}")
@@ -1745,13 +1749,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         log(f"{addon.name}: selected archive {archive_path.name}")
         if not target.exists():
             log(f"{addon.name}: target does not exist yet, it will be created during install: {target}")
-            append_install_overlay_line(f"目标目录不存在，将自动创建: {target}")
+            append_install_overlay_line(_("目标目录不存在，将自动创建: {target}", target=target))
         else:
-            append_install_overlay_line(f"目标目录: {target}")
+            append_install_overlay_line(_("目标目录: {target}", target=target))
 
         try:
             if is_sim_base_navdata_addon(addon):
-                append_install_overlay_line("机型为 MSFS 导航数据库，跳过 cycle.json 校验")
+                append_install_overlay_line(_("机型为 MSFS 导航数据库，跳过 cycle.json 校验"))
                 archive_airac = detect_airac(archive_path.name) or "UNKNOWN"
                 await rebuild_lists_async(show_loading=False)
                 ok_task = start_archive_update(
@@ -1767,32 +1771,32 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     return await ok_task
                 return False
             log(f"{addon.name}: parsing archive payload from {archive_path.name}")
-            append_install_overlay_line("正在提取 cycle.json 并校验...")
+            append_install_overlay_line(_("正在提取 cycle.json 并校验..."))
             archive_payload = await run_blocking_with_feedback(
                 prepare_archive_payload,
                 archive_path,
-                message="正在提取并校验 cycle.json",
+                message=_("正在提取并校验 cycle.json"),
                 pulse_interval=0.25,
                 progress_callback=append_install_overlay_line,
                 provide_progress_callback=True,
                 show_page_loading=False,
             )
         except Exception as exc:
-            append_install_overlay_line(f"cycle 校验失败: {exc}")
-            snack(f"cycle 校验失败: {exc}")
+            append_install_overlay_line(_("cycle 校验失败: {exc}", exc=exc))
+            snack(_("cycle 校验失败: {exc}", exc=exc))
             if show_result_dialog:
                 show_info_dialog(
-                    "校验失败",
+                    _("校验失败"),
                     f"{addon.name} cycle.json 校验失败。\n\n压缩包: {archive_path.name}\n错误详情：{exc}",
                 )
             await rebuild_lists_async(show_loading=False)
             return False
         if not archive_payload:
-            append_install_overlay_line("压缩包中未找到可用 cycle.json，无法安装")
+            append_install_overlay_line(_("压缩包中未找到可用 cycle.json，无法安装"))
             snack(f"压缩包中未找到可用 cycle.json: {archive_path.name}")
             if show_result_dialog:
                 show_info_dialog(
-                    "压缩包无效",
+                    _("压缩包无效"),
                     f"{archive_path.name} 中未找到可用 cycle.json，无法继续安装。",
                 )
             await rebuild_lists_async(show_loading=False)
@@ -1809,14 +1813,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             f"airac={archive_airac}, payload_prefix='{payload_prefix or '<root>'}'"
         )
         append_install_overlay_line(
-            f"压缩包校验完成: 机型名称 '{cycle_name or '空'}'，AIRAC {archive_airac}"
+            f"压缩包校验完成: 机型名称 '{cycle_name or _("空")}'，AIRAC {archive_airac}"
         )
         if probe_root is not None:
             await asyncio.to_thread(cleanup_temp_dir, probe_root)
 
         async def continue_install_async() -> bool:
             log(f"{addon.name}: archive validation passed, installing...")
-            append_install_overlay_line("压缩包校验通过，开始解压并安装...")
+            append_install_overlay_line(_("压缩包校验通过，开始解压并安装..."))
             clear_force_install_prompt(refresh=False)
             task = start_archive_update(
                 addon=addon,
@@ -1836,7 +1840,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
         def cancel_install(reason: str) -> None:
             log(f"{addon.name}: update canceled by user ({reason})")
-            append_install_overlay_line(f"用户取消安装（{reason}）")
+            append_install_overlay_line(_("用户取消安装（{reason}）", reason=reason))
 
         if is_sim_base_navdata_addon(addon):
             return await continue_install_async()
@@ -1845,20 +1849,20 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if not cycle_name_norm:
             if not allow_force_prompt:
                 log(f"{addon.name}: cycle.json name empty, skipped in batch mode")
-                append_install_overlay_line("cycle.json 的 name 为空，批量模式下已跳过")
+                append_install_overlay_line(_("cycle.json 的 name 为空，批量模式下已跳过"))
                 return False
             log(f"{addon.name}: cycle.json name is empty, waiting for user confirmation")
             set_force_install_prompt(
-                "cycle.json 的 name 字段为空，无法校验机型匹配",
+                _("cycle.json 的 name 字段为空，无法校验机型匹配"),
                 on_force=continue_install,
-                on_cancel=lambda: cancel_install("cycle.json name 为空"),
+                on_cancel=lambda: cancel_install(_("cycle.json name 为空")),
             )
-            snack("cycle.json 的 name 为空，请点击“强制安装”继续。")
+            snack(_("cycle.json 的 name 为空，请点击“强制安装”继续。"))
             return False
         if not cycle_name_matches_addon(addon, cycle_name):
             if not allow_force_prompt:
                 log(f"{addon.name}: cycle name mismatch in batch mode (archive='{cycle_name}')")
-                append_install_overlay_line(f"机型名称不匹配，批量模式下已跳过: {cycle_name}")
+                append_install_overlay_line(_("机型名称不匹配，批量模式下已跳过: {cycle_name}", cycle_name=cycle_name))
                 return False
             log(
                 f"{addon.name}: cycle name mismatch detected (archive='{cycle_name}', addon='{addon.name}'), "
@@ -1870,9 +1874,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             set_force_install_prompt(
                 f"机型名称不匹配（压缩包: {cycle_name}，当前机型: {addon.name}）",
                 on_force=continue_install,
-                on_cancel=lambda: cancel_install(f"机型名称不匹配: {cycle_name}"),
+                on_cancel=lambda: cancel_install(_("机型名称不匹配: {cycle_name}", cycle_name=cycle_name)),
             )
-            snack("检测到机型名称不匹配，请点击“强制安装”继续。")
+            snack(_("检测到机型名称不匹配，请点击“强制安装”继续。"))
             return False
         return await continue_install_async()
 
@@ -1890,7 +1894,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         try:
             addon = find_addon_by_key(addon_key_value)
             if addon is None:
-                snack("未找到对应机型。")
+                snack(_("未找到对应机型。"))
                 return False
             if bulk_mode and not is_default_catalog_addon(addon):
                 append_install_overlay_line(f"{addon.name}: 跳过（手动添加机型需手动选包）")
@@ -1903,11 +1907,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 if target is None and not bulk_mode and not is_default_catalog_addon(addon):
                     target = await prompt_manual_addon_target_path(addon)
                     if target is None:
-                        snack("未选择路径，已取消本次更新。")
+                        snack(_("未选择路径，已取消本次更新。"))
                         return False
                     log(f"{addon.name}: using user-selected target {target}")
                 if target is None:
-                    message = "未检测到已安装数据。请先确认 WASM 下存在对应机型文件夹名称。"
+                    message = _("未检测到已安装数据。请先确认 WASM 下存在对应机型文件夹名称。")
                     if bulk_mode:
                         append_install_overlay_line(f"{addon.name}: {message}")
                     else:
@@ -1917,7 +1921,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     log(f"{addon.name}: no installed navdata found, using WASM inferred target {target}")
             log(f"{addon.name}: update requested, target={target}")
             if target.exists() and not target.is_dir():
-                message = f"目标路径不是文件夹: {target}"
+                message = _("目标路径不是文件夹: {target}", target=target)
                 if bulk_mode:
                     append_install_overlay_line(f"{addon.name}: {message}")
                 else:
@@ -1948,7 +1952,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if cycle_info and cycle_info.get("cycle_id"):
                         cycle_id = detect_airac(str(cycle_info.get("cycle_id", "")))
                 if cycle_id in {"", "UNKNOWN"}:
-                    message = "未获取到有效 AIRAC 期数，无法自动下载。"
+                    message = _("未获取到有效 AIRAC 期数，无法自动下载。")
                     if bulk_mode:
                         append_install_overlay_line(f"{addon.name}: {message}")
                     else:
@@ -1961,7 +1965,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             open_install_overlay(title=f"安装状态 - {addon.name}", reset=reset_overlay)
                     else:
                         open_install_overlay(title=f"安装状态 - {addon.name}", reset=reset_overlay)
-                    append_install_overlay_line(f"自动模式: 期数 {cycle_id}")
+                    append_install_overlay_line(_("自动模式: 期数 {cycle_id}", cycle_id=cycle_id))
                     saved_token_for_hash = str(state.get("backup_power_token", "")).strip()
                     expected_hash = ""
                     if saved_token_for_hash:
@@ -1974,7 +1978,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 if guess_name:
                                     expected_hash = fetch_archive_expected_hash(saved_token_for_hash, cycle_id, guess_name)
                         except Exception as exc:
-                            log(f"获取预期哈希失败（将跳过校验）: {exc}")
+                            log(_("获取预期哈希失败（将跳过校验）: {exc}", exc=exc))
                     result = await run_blocking_with_feedback(
                         download_openlist_archive_for_addon,
                         addon,
@@ -1989,7 +1993,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     )
                     archive_path = Path(str(result.get("archive_path", "")).strip())
                     if not archive_path.exists():
-                        raise ValueError(f"自动下载后未找到压缩包: {archive_path}")
+                        raise ValueError(_("自动下载后未找到压缩包: {archive_path}", archive_path=archive_path))
                     log(f"{addon.name}: OpenList auto archive selected {archive_path}")
                     append_install_overlay_line(f"已自动下载压缩包: {archive_path.name}")
                     picked = [type("PickedFile", (), {"path": str(archive_path)})()]
@@ -2008,12 +2012,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         append_install_overlay_line(f"{addon.name}: 自动下载失败: {exc}")
                         return False
                     log(f"{addon.name}: OpenList auto download failed, fallback to manual picker ({exc})")
-                    snack(f"自动下载失败，已切换手动选包: {exc}")
+                    snack(_("自动下载失败，已切换手动选包: {exc}", exc=exc))
             if bulk_mode:
                 append_install_overlay_line(f"{addon.name}: 跳过（当前模式不允许手动选包）")
                 return False
             if zip_update_picker is None:
-                snack("压缩包选择器未初始化")
+                snack(_("压缩包选择器未初始化"))
                 return False
             try:
                 selected_files = await zip_update_picker.pick_files(
@@ -2032,7 +2036,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     reset_overlay=True,
                 )
             except Exception as exc:
-                snack(f"打开压缩包选择窗口失败: {exc}")
+                snack(_("打开压缩包选择窗口失败: {exc}", exc=exc))
                 return False
         finally:
             set_button_busy(trigger_button, False)
@@ -2041,10 +2045,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         def _handler(e) -> None:
             button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
             if is_button_busy(button):
-                snack("任务正在处理中，请稍候。")
+                snack(_("任务正在处理中，请稍候。"))
                 return
             reset_operation_dialog_suppression()
-            set_button_busy(button, True, "处理中...")
+            set_button_busy(button, True, _("处理中..."))
             chosen_cycle = (cycle_dropdown_value or "").strip() if (backup_power_login_valid and not local_only) else ""
 
             async def _runner():
@@ -2052,7 +2056,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if chosen_cycle:
                         ok = await confirm_non_latest_cycle(chosen_cycle)
                         if not ok:
-                            snack("已取消本次安装。")
+                            snack(_("已取消本次安装。"))
                             set_button_busy(button, False)
                             return
                     await on_update_navdata_click(addon_key_value, button, forced_cycle_id=chosen_cycle or None, local_only=local_only)
@@ -2077,9 +2081,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         lines = read_log_lines(limit=400)
         log_count = len(lines)
         if not lines:
-            lines = ["暂无当日日志"]
+            lines = [_("暂无当日日志")]
         today_text = datetime.now().strftime("%Y-%m-%d")
-        log_overlay_title.value = f"活动日志（{today_text}）({log_count})"
+        log_overlay_title.value = _("活动日志（{today_text}）({log_count})", today_text=today_text, log_count=log_count)
         log_overlay_list.controls = [
             ft.Container(
                 border_radius=10,
@@ -2100,7 +2104,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         update_controls(log_overlay_container)
 
     def refresh_install_overlay() -> None:
-        lines = install_overlay_lines[-240:] if install_overlay_lines else ["暂无安装日志"]
+        lines = install_overlay_lines[-240:] if install_overlay_lines else [_("暂无安装日志")]
         install_overlay_title.value = f"{install_overlay_title_text} ({len(lines)})"
         install_overlay_list.controls = [
             ft.Container(
@@ -2174,7 +2178,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if install_force_button is not None:
             install_force_button.visible = True
             install_force_button.disabled = False
-        append_install_overlay_line(f"{reason}。如确认无误，请点击右上角“强制安装”继续。")
+        append_install_overlay_line(_("{reason}。如确认无误，请点击右上角“强制安装”继续。", reason=reason))
         if install_overlay_container.visible:
             page.update()
             schedule_install_overlay_scroll_to_bottom()
@@ -2182,15 +2186,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     def run_pending_force_install(_e=None) -> None:
         action = pending_force_install_action
         if not callable(action):
-            snack("当前没有待确认的强制安装任务。")
+            snack(_("当前没有待确认的强制安装任务。"))
             return
         clear_force_install_prompt(refresh=False)
         try:
-            append_install_overlay_line("用户点击“强制安装”，继续执行安装。")
+            append_install_overlay_line(_("用户点击“强制安装”，继续执行安装。"))
             invoke_callback(action)
         except Exception as exc:
-            snack(f"强制安装执行失败: {exc}")
-            append_install_overlay_line(f"强制安装执行失败: {exc}")
+            snack(_("强制安装执行失败: {exc}", exc=exc))
+            append_install_overlay_line(_("强制安装执行失败: {exc}", exc=exc))
         finally:
             if install_overlay_container.visible:
                 page.update()
@@ -2208,7 +2212,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if install_overlay_container.visible:
             page.update()
 
-    def open_install_overlay(title: str = "安装状态", reset: bool = False) -> None:
+    def open_install_overlay(title: str = _("安装状态"), reset: bool = False) -> None:
         nonlocal install_overlay_title_text
         if reset:
             install_overlay_lines.clear()
@@ -2221,7 +2225,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def close_install_overlay(_e=None) -> None:
         if pending_force_install_action is not None:
-            cancel_pending_force_install("用户关闭安装状态窗口，已取消待确认安装。")
+            cancel_pending_force_install(_("用户关闭安装状态窗口，已取消待确认安装。"))
         install_overlay_container.visible = False
         page.update()
 
@@ -2275,12 +2279,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if not path_text:
             return "Target path not set"
         if streamer_mode:
-            return "路径已隐藏"
+            return _("路径已隐藏")
         return path_text
 
     def open_folder(path_text: str) -> None:
         if not path_text:
-            snack("目标路径未设置")
+            snack(_("目标路径未设置"))
             return
         p = Path(path_text)
         if p.exists():
@@ -2293,7 +2297,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             focus_explorer_window(p.parent.name)
             snack(f"目标文件夹不存在，已打开上级目录: {p.parent}")
             return
-        snack(f"路径不存在: {path_text}")
+        snack(_("路径不存在: {path_text}", path_text=path_text))
 
     def restore_addon_backup(addon: Addon, target: Path) -> None:
         latest_backup = _utils_find_latest_backup_for_addon(addon, BACKUP_DIR)
@@ -2333,22 +2337,22 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 end_text = info["end"].astimezone().strftime("%Y-%m-%d")
                 days_left = max(0, (info["end"] - datetime.now(timezone.utc)).days)
                 airac_id_text.value = cycle_id
-                airac_effective_text.value = f"本期数据生效日期：{start_text}"
-                end_text_mmdd = info["end"].astimezone().strftime("%m月%d日")
-                airac_next_text.value = f"本期数据将于{end_text_mmdd}到期（还有{days_left}天）"
+                airac_effective_text.value = _("本期数据生效日期：{start_text}", start_text=start_text)
+                end_text_mmdd = info["end"].astimezone().strftime(_("%m月%d日"))
+                airac_next_text.value = _("本期数据将于{end_text_mmdd}到期（还有{days_left}天）", end_text_mmdd=end_text_mmdd, days_left=days_left)
                 log(f"AIRAC current cycle fetched: {cycle_id} (effective {start_text}, end {end_text})")
             else:
                 airac_id_text.value = "--"
-                airac_effective_text.value = "本期数据生效日期：--"
-                airac_next_text.value = "本期数据将于--月--日到期"
+                airac_effective_text.value = _("本期数据生效日期：--")
+                airac_next_text.value = _("本期数据将于--月--日到期")
             update_controls(airac_id_text, airac_effective_text, airac_next_text)
         except Exception as exc:
             current_cycle_info = None
             airac_id_text.value = "--"
-            airac_effective_text.value = "本期数据生效日期：--"
-            airac_next_text.value = "本期数据将于--月--日到期"
+            airac_effective_text.value = _("本期数据生效日期：--")
+            airac_next_text.value = _("本期数据将于--月--日到期")
             update_controls(airac_id_text, airac_effective_text, airac_next_text)
-            snack(f"刷新周期失败: {exc}")
+            snack(_("刷新周期失败: {exc}", exc=exc))
 
     def visible_addons() -> list[Addon]:
         current_sim = simulator
@@ -2476,11 +2480,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 ],
                             ),
                             ft.Text(
-                                "已安装" if addon.package_name.strip().lower() in {"navigraph-msfs2020-base", "navigraph-msfs2024-base"}
-                                else f"已安装: {installed}    API: {api}",
+                                _("已安装") if addon.package_name.strip().lower() in {"navigraph-msfs2020-base", "navigraph-msfs2024-base"}
+                                else _("已安装: {installed}    API: {api}", installed=installed, api=api),
                                 size=fs(12), color=colors["card_meta"]),
                             ft.Text(
-                                "未检测到 cycle.json / cycle_info.txt\n建议点击「打开目录」检查文件夹结构",
+                                _("未检测到 cycle.json / cycle_info.txt\n建议点击「打开目录」检查文件夹结构"),
                                 size=fs(11),
                                 color="#c99600",
                                 italic=True,
@@ -2490,7 +2494,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 spacing=6,
                                 controls=[
                                     ft.Button(
-                                        "更新导航数据",
+                                        _("更新导航数据"),
                                         icon=ft.Icons.UPLOAD_FILE,
                                         bgcolor="#1a73e8",
                                         color="#ffffff",
@@ -2501,7 +2505,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                         on_click=make_update_click_handler(key),
                                     ),
                                     ft.Button(
-                                        "从本地安装",
+                                        _("从本地安装"),
                                         icon=ft.Icons.FOLDER_ZIP,
                                         bgcolor=colors["panel_soft_bg"],
                                         color=colors["text_title"],
@@ -2513,7 +2517,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                         visible=backup_power_login_valid,
                                     ),
                                     ft.Button(
-                                        "打开目录",
+                                        _("打开目录"),
                                         icon=ft.Icons.FOLDER_OPEN,
                                         bgcolor=colors["panel_bg"],
                                         color=colors["text_meta"],
@@ -2524,7 +2528,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                         on_click=lambda _e, p=target: open_folder(p),
                                     ),
                                     ft.Button(
-                                        "恢复上次安装的文件",
+                                        _("恢复上次安装的文件"),
                                         icon=ft.Icons.RESTORE,
                                         bgcolor="#b83d4b",
                                         color="#ffffff",
@@ -2554,9 +2558,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             ft.Icon(ft.Icons.INBOX_OUTLINED, size=58, color=colors["text_sub"]),
-                            ft.Text("暂无该过滤条件的机型", size=fs(16), weight=ft.FontWeight.W_700, color=colors["text_meta"]),
+                            ft.Text(_("暂无该过滤条件的机型"), size=fs(16), weight=ft.FontWeight.W_700, color=colors["text_meta"]),
                             ft.Button(
-                                "重置筛选",
+                                _("重置筛选"),
                                 icon=ft.Icons.RESTART_ALT,
                                 on_click=lambda _e: on_filter_change("All"),
                                 bgcolor=colors["panel_bg"],
@@ -2599,25 +2603,25 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 end_text = info["end"].astimezone().strftime("%Y-%m-%d")
                 days_left = max(0, (info["end"] - datetime.now(timezone.utc)).days)
                 airac_id_text.value = cycle_id
-                airac_effective_text.value = f"本期数据生效日期：{start_text}"
-                end_text_mmdd = info["end"].astimezone().strftime("%m月%d日")
-                airac_next_text.value = f"本期数据将于{end_text_mmdd}到期（还有{days_left}天）"
+                airac_effective_text.value = _("本期数据生效日期：{start_text}", start_text=start_text)
+                end_text_mmdd = info["end"].astimezone().strftime(_("%m月%d日"))
+                airac_next_text.value = _("本期数据将于{end_text_mmdd}到期（还有{days_left}天）", end_text_mmdd=end_text_mmdd, days_left=days_left)
                 log(f"AIRAC current cycle fetched: {cycle_id} (effective {start_text}, end {end_text})")
             else:
                 airac_id_text.value = "--"
-                airac_effective_text.value = "本期数据生效日期：--"
-                airac_next_text.value = "本期数据将于--月--日到期"
+                airac_effective_text.value = _("本期数据生效日期：--")
+                airac_next_text.value = _("本期数据将于--月--日到期")
             update_controls(airac_id_text, airac_effective_text, airac_next_text)
         except Exception as exc:
             current_cycle_info = None
             airac_id_text.value = "--"
-            airac_effective_text.value = "本期数据生效日期：--"
-            airac_next_text.value = "本期数据将于--月--日到期"
+            airac_effective_text.value = _("本期数据生效日期：--")
+            airac_next_text.value = _("本期数据将于--月--日到期")
             update_controls(airac_id_text, airac_effective_text, airac_next_text)
             if notify_fail:
-                snack(f"刷新周期失败: {exc}")
+                snack(_("刷新周期失败: {exc}", exc=exc))
             else:
-                log(f"刷新周期失败: {exc}")
+                log(_("刷新周期失败: {exc}", exc=exc))
 
     def show_loading_state(message: str) -> None:
         left_list.controls = [ft.Text(message, size=fs(12), color=colors["text_sub"])]
@@ -2651,7 +2655,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if show_page_loading:
             show_loading_state(message)
         if show_operation_dialog_ui:
-            show_operation_dialog("处理中", message, "已耗时 0s")
+            show_operation_dialog(_("处理中"), message, _("已耗时 0s"))
         progress_queue: SimpleQueue[str] = SimpleQueue()
 
         def worker_progress(line: str) -> None:
@@ -2703,7 +2707,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 if show_page_loading and not op_dialog_suppressed:
                     show_loading_state(step_msg)
                 if show_operation_dialog_ui:
-                    update_operation_dialog(step_msg, f"已耗时 {elapsed}s")
+                    update_operation_dialog(step_msg, _("已耗时 {elapsed}s", elapsed=elapsed))
             result = await task
             flush_progress_queue()
             return result
@@ -2717,7 +2721,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         rebuild_generation += 1
         generation = rebuild_generation
         if show_loading:
-            show_loading_state("正在扫描机型状态...")
+            show_loading_state(_("正在扫描机型状态..."))
         api_cycle = "NONE"
         if current_cycle_info and current_cycle_info.get("cycle_id"):
             api_cycle = str(current_cycle_info["cycle_id"])
@@ -2744,28 +2748,28 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     async def rescan_and_rebuild_async(show_loading: bool = False, notify_done: bool = False) -> None:
         try:
             if show_loading:
-                show_loading_state("正在重新扫描资源...")
+                show_loading_state(_("正在重新扫描资源..."))
             zip_count, extracted_count = await asyncio.to_thread(rescan_sources)
             log(f"Rescanned source: {zip_count} zip(s), {extracted_count} extracted package(s).")
             await rebuild_lists_async(show_loading=False)
             if notify_done:
-                snack("已重新扫描并刷新机型列表。")
+                snack(_("已重新扫描并刷新机型列表。"))
         except Exception as exc:
-            snack(f"重新扫描失败: {exc}")
+            snack(_("重新扫描失败: {exc}", exc=exc))
 
     def on_refresh_click(e):
         button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
         if is_button_busy(button):
-            snack("刷新任务正在进行中，请稍候。")
+            snack(_("刷新任务正在进行中，请稍候。"))
             return
         reset_operation_dialog_suppression()
-        set_button_busy(button, True, "刷新中...")
+        set_button_busy(button, True, _("刷新中..."))
 
         async def runner() -> None:
             try:
                 airac_id_text.value = "..."
-                airac_effective_text.value = "本期数据生效日期：刷新中..."
-                airac_next_text.value = "本期数据将于--月--日到期"
+                airac_effective_text.value = _("本期数据生效日期：刷新中...")
+                airac_next_text.value = _("本期数据将于--月--日到期")
                 update_controls(airac_id_text, airac_effective_text, airac_next_text, button)
                 await refresh_cycle_async()
                 await rebuild_lists_async(show_loading=False)
@@ -2777,10 +2781,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     def on_rescan_click(e):
         button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
         if is_button_busy(button):
-            snack("扫描任务正在进行中，请稍候。")
+            snack(_("扫描任务正在进行中，请稍候。"))
             return
         reset_operation_dialog_suppression()
-        set_button_busy(button, True, "扫描中...")
+        set_button_busy(button, True, _("扫描中..."))
 
         async def runner() -> None:
             try:
@@ -2797,8 +2801,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             key24_extra = platform
             has20 = bool(state.get("enabled_simulators", {}).get("MSFS 2020", True))
             has24 = bool(state.get("enabled_simulators", {}).get("MSFS 2024", True))
-            has20_check = ft.Checkbox(label="我有 MSFS 2020", value=has20)
-            has24_check = ft.Checkbox(label="我有 MSFS 2024", value=has24)
+            has20_check = ft.Checkbox(label=_("我有 MSFS 2020"), value=has20)
+            has24_check = ft.Checkbox(label=_("我有 MSFS 2024"), value=has24)
             fs20_field = ft.TextField(
                 label="FS20 Community",
                 value=str(state.get("community_paths", {}).get(key20, "")).strip() or default_community_base("MSFS 2020", platform),
@@ -2819,7 +2823,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 state.get("batch_download_workers", DEFAULT_BATCH_DOWNLOAD_WORKERS)
             )
             workers_dd = ft.Dropdown(
-                label="一键安装下载线程数",
+                label=_("一键安装下载线程数"),
                 value=str(current_workers),
                 options=[ft.dropdown.Option(str(v)) for v in BATCH_DOWNLOAD_WORKER_OPTIONS],
                 width=220,
@@ -2827,7 +2831,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             default_cache_root_display = str(resolve_cache_root_dir(None, create=False))
             configured_cache_root = normalize_cache_root_dir(str(state.get("cache_root_dir", "")).strip())
             cache_root_field = ft.TextField(
-                label="缓存目录（可选）",
+                label=_("缓存目录（可选）"),
                 value=configured_cache_root or default_cache_root_display,
                 hint_text=r"留空使用默认内部目录",
                 expand=True,
@@ -2836,17 +2840,26 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 state.get("cache_cleanup_days", DEFAULT_CACHE_CLEANUP_DAYS)
             )
             cache_cleanup_days_dd = ft.Dropdown(
-                label="缓存自动清理周期（天）",
+                label=_("缓存自动清理周期（天）"),
                 value=str(cache_cleanup_days),
                 options=[ft.dropdown.Option(str(v)) for v in CACHE_CLEANUP_DAY_OPTIONS],
                 width=220,
             )
             crash_upload_check = ft.Checkbox(
-                label="发生崩溃时自动上传报告（匿名）",
+                label=_("发生崩溃时自动上传报告（匿名）"),
                 value=bool(state.get("crash_upload_enabled", False)),
             )
+            language_dd = ft.Dropdown(
+                label=_("界面语言 / Language"),
+                value=str(state.get("locale", "zh") or "zh"),
+                options=[
+                    ft.dropdown.Option("zh", "中文"),
+                    ft.dropdown.Option("en", "English"),
+                ],
+                width=220,
+            )
             cycle_subscribe_check = ft.Checkbox(
-                label="新 AIRAC 期数上架时邮件通知我",
+                label=_("新 AIRAC 期数上架时邮件通知我"),
                 value=bool(state.get("cycle_subscribe_enabled", False)),
             )
             err = ft.Text("", size=fs(12), color="#b83d4b")
@@ -2857,7 +2870,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 selectable=True,
             )
             update_check_status = ft.Text(
-                "更新状态: 未检查",
+                _("更新状态: 未检查"),
                 size=fs(12),
                 color=colors["text_meta"],
                 selectable=True,
@@ -2876,11 +2889,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             sim_2020_dot = _make_sim_dot(bool(getattr(_scs_initial, "running_2020", False)))
             sim_2024_dot = _make_sim_dot(bool(getattr(_scs_initial, "running_2024", False)))
             sim_2020_text = ft.Text(
-                "MSFS 2020：" + ("运行中" if getattr(_scs_initial, "running_2020", False) else "未运行"),
+                "MSFS 2020：" + (_("运行中") if getattr(_scs_initial, "running_2020", False) else _("未运行")),
                 size=fs(12), color=colors["text_sub"],
             )
             sim_2024_text = ft.Text(
-                "MSFS 2024：" + ("运行中" if getattr(_scs_initial, "running_2024", False) else "未运行"),
+                "MSFS 2024：" + (_("运行中") if getattr(_scs_initial, "running_2024", False) else _("未运行")),
                 size=fs(12), color=colors["text_sub"],
             )
             sim_status_row = ft.Row(spacing=16, controls=[
@@ -2895,8 +2908,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         st = _scs2.latest_status()
                         sim_2020_dot.bgcolor = "#2ecc71" if st.running_2020 else "#e74c3c"
                         sim_2024_dot.bgcolor = "#2ecc71" if st.running_2024 else "#e74c3c"
-                        sim_2020_text.value = "MSFS 2020：" + ("运行中" if st.running_2020 else "未运行")
-                        sim_2024_text.value = "MSFS 2024：" + ("运行中" if st.running_2024 else "未运行")
+                        sim_2020_text.value = "MSFS 2020：" + (_("运行中") if st.running_2020 else _("未运行"))
+                        sim_2024_text.value = "MSFS 2024：" + (_("运行中") if st.running_2024 else _("未运行"))
                         try:
                             update_controls(sim_2020_dot, sim_2024_dot, sim_2020_text, sim_2024_text)
                         except Exception:
@@ -2910,14 +2923,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             except Exception:
                 pass
 
-            check_update_btn = ft.Button("检查更新")
-            open_release_btn = ft.TextButton("打开发布页", visible=False)
+            check_update_btn = ft.Button(_("检查更新"))
+            open_release_btn = ft.TextButton(_("打开发布页"), visible=False)
             latest_release_url = f"https://github.com/{normalize_github_repo(GITHUB_RELEASE_REPO)}/releases"
             dlg: ft.Control | None = None
-            browse20_btn = ft.Button("浏览")
-            browse24_btn = ft.Button("浏览")
-            browse24_extra_btn = ft.Button("浏览")
-            browse_cache_btn = ft.Button("修改")
+            browse20_btn = ft.Button(_("浏览"))
+            browse24_btn = ft.Button(_("浏览"))
+            browse24_extra_btn = ft.Button(_("浏览"))
+            browse_cache_btn = ft.Button(_("修改"))
 
             for ctrl in list(page.services):
                 if isinstance(ctrl, ft.FilePicker) and getattr(ctrl, "data", None) in {
@@ -2950,7 +2963,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             async def run_manual_update_check() -> None:
                 nonlocal latest_release_url
                 repo = normalize_github_repo(GITHUB_RELEASE_REPO)
-                update_check_status.value = f"更新状态: 正在检查 ({repo})..."
+                update_check_status.value = _("更新状态: 正在检查 ({repo})...", repo=repo)
                 open_release_btn.visible = False
                 if not try_control_update(dlg):
                     page.update()
@@ -2959,9 +2972,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 except Exception as exc:
                     latest_release_url = f"https://github.com/{repo}/releases"
                     update_check_status.value = (
-                        "更新状态: 与github通信失败，请手动检查更新或更换网络后重试。"
+                        _("更新状态: 与github通信失败，请手动检查更新或更换网络后重试。")
                     )
-                    log(f"设置页检查更新失败: {exc}")
+                    log(_("设置页检查更新失败: {exc}", exc=exc))
                     open_release_btn.visible = True
                     if not try_control_update(dlg):
                         page.update()
@@ -2987,7 +3000,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def check_update_click(_evt=None) -> None:
                 if is_button_busy(check_update_btn):
                     return
-                set_button_busy(check_update_btn, True, "检查中...")
+                set_button_busy(check_update_btn, True, _("检查中..."))
 
                 async def runner() -> None:
                     try:
@@ -3000,12 +3013,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def browse_fs20(_evt) -> None:
                 async def runner() -> None:
                     try:
-                        path = await picker20.get_directory_path(dialog_title="选择 FS20 Community")
+                        path = await picker20.get_directory_path(dialog_title=_("选择 FS20 Community"))
                         if path:
                             fs20_field.value = path
                             page.update()
                     except Exception as exc:
-                        err.value = f"选择目录失败: {exc}"
+                        err.value = _("选择目录失败: {exc}", exc=exc)
                         page.update()
 
                 page.run_task(runner)
@@ -3013,12 +3026,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def browse_fs24(_evt) -> None:
                 async def runner() -> None:
                     try:
-                        path = await picker24.get_directory_path(dialog_title="选择 FS24 Community")
+                        path = await picker24.get_directory_path(dialog_title=_("选择 FS24 Community"))
                         if path:
                             fs24_field.value = path
                             page.update()
                     except Exception as exc:
-                        err.value = f"选择目录失败: {exc}"
+                        err.value = _("选择目录失败: {exc}", exc=exc)
                         page.update()
 
                 page.run_task(runner)
@@ -3026,12 +3039,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def browse_fs24_extra(_evt) -> None:
                 async def runner() -> None:
                     try:
-                        path = await picker24_extra.get_directory_path(dialog_title="选择 FS24 Community2024")
+                        path = await picker24_extra.get_directory_path(dialog_title=_("选择 FS24 Community2024"))
                         if path:
                             fs24_extra_field.value = path
                             page.update()
                     except Exception as exc:
-                        err.value = f"选择目录失败: {exc}"
+                        err.value = _("选择目录失败: {exc}", exc=exc)
                         page.update()
 
                 page.run_task(runner)
@@ -3039,12 +3052,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def browse_cache_dir(_evt) -> None:
                 async def runner() -> None:
                     try:
-                        path = await picker_cache.get_directory_path(dialog_title="选择缓存目录")
+                        path = await picker_cache.get_directory_path(dialog_title=_("选择缓存目录"))
                         if path:
                             cache_root_field.value = path
                             page.update()
                     except Exception as exc:
-                        err.value = f"选择目录失败: {exc}"
+                        err.value = _("选择目录失败: {exc}", exc=exc)
                         page.update()
 
                 page.run_task(runner)
@@ -3088,32 +3101,32 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 has20_selected = bool(has20_check.value)
                 has24_selected = bool(has24_check.value)
                 if not has20_selected and not has24_selected:
-                    err.value = "至少需要选择一个模拟器（MSFS 2020 或 MSFS 2024）。"
+                    err.value = _("至少需要选择一个模拟器（MSFS 2020 或 MSFS 2024）。")
                     page.update()
                     return
                 if has20_selected and not is_valid_community_path(p20):
-                    err.value = "MSFS 2020 已启用，请填写有效的 FS20 Community 路径（目录名需为 Community）。"
+                    err.value = _("MSFS 2020 已启用，请填写有效的 FS20 Community 路径（目录名需为 Community）。")
                     page.update()
                     return
                 if has24_selected and not is_valid_community_path(p24):
-                    err.value = "MSFS 2024 已启用，请填写有效的 FS24 Community 路径（目录名需为 Community）。"
+                    err.value = _("MSFS 2024 已启用，请填写有效的 FS24 Community 路径（目录名需为 Community）。")
                     page.update()
                     return
                 if has24_selected and not is_valid_community2024_path(p24_extra):
-                    err.value = "MSFS 2024 已启用，请填写有效的 FS24 Community2024 路径（目录名需为 Community2024 或 Community）。"
+                    err.value = _("MSFS 2024 已启用，请填写有效的 FS24 Community2024 路径（目录名需为 Community2024 或 Community）。")
                     page.update()
                     return
                 effective_cache_root = cache_root_to_save or default_cache_root_normalized
                 if effective_cache_root:
                     cache_root_path = Path(effective_cache_root)
                     if cache_root_path.exists() and not cache_root_path.is_dir():
-                        err.value = "缓存目录路径无效：该路径存在但不是目录。"
+                        err.value = _("缓存目录路径无效：该路径存在但不是目录。")
                         page.update()
                         return
                     try:
                         cache_root_path.mkdir(parents=True, exist_ok=True)
                     except Exception as exc:
-                        err.value = f"创建缓存目录失败: {exc}"
+                        err.value = _("创建缓存目录失败: {exc}", exc=exc)
                         page.update()
                         return
                 state.setdefault("community_paths", {})[key20] = p20
@@ -3125,6 +3138,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 state["cache_root_dir"] = cache_root_to_save
                 state["cache_cleanup_days"] = cleanup_days
                 state["crash_upload_enabled"] = bool(crash_upload_check.value)
+                new_locale = str(language_dd.value or "zh").strip().lower() or "zh"
+                locale_changed = new_locale != str(state.get("locale", "zh") or "zh")
+                state["locale"] = new_locale
+                if locale_changed:
+                    from i18n import set_locale as _set_locale
+                    _set_locale(new_locale)
                 new_subscribe_enabled = bool(cycle_subscribe_check.value)
                 old_subscribe_enabled = bool(state.get("cycle_subscribe_enabled", False))
                 state["cycle_subscribe_enabled"] = new_subscribe_enabled
@@ -3134,8 +3153,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         try:
                             backup_power_cycle_subscription_put(saved_token, new_subscribe_enabled)
                         except Exception as exc:
-                            log(f"同步期数订阅状态失败：{exc}")
-                            snack(f"订阅设置保存失败: {exc}")
+                            log(_("同步期数订阅状态失败：{exc}", exc=exc))
+                            snack(_("订阅设置保存失败: {exc}", exc=exc))
                 nonlocal simulator
                 enabled_now = enabled_simulators(state)
                 if simulator not in enabled_now:
@@ -3145,15 +3164,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 save_state(state)
                 clear_cycle_json_scan_cache()
                 close_dialog()
-                snack("设置已保存")
+                snack(_("设置已保存"))
                 page.clean()
                 main(page, fast_reload=True, cached_cycle=current_cycle_info)
 
             dlg = custom_modal_container
             open_custom_modal(
-                "设置",
+                _("设置"),
                 [
-                    ft.Text(f"当前平台: {platform}", size=fs(12), color=colors["text_sub"]),
+                    ft.Text(_("当前平台: {platform}", platform=platform), size=fs(12), color=colors["text_sub"]),
                     ft.Row(spacing=10, controls=[current_version_text, check_update_btn, open_release_btn]),
                     update_check_status,
                     sim_status_row,
@@ -3164,20 +3183,22 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     ft.Row(spacing=8, controls=[workers_dd]),
                     ft.Row(spacing=8, controls=[cache_root_field, browse_cache_btn]),
                     ft.Row(spacing=8, controls=[cache_cleanup_days_dd]),
-                    ft.Text(f"默认缓存目录: {default_cache_root_display}", size=fs(12), color=colors["text_meta"]),
-                    ft.Text("目录必须存在；FS20/FS24 目录名需为 Community，FS24 Community2024 路径目录名需为 Community2024。", size=fs(12), color=colors["text_meta"]),
-                    ft.Text("一键安装会并发下载，线程越大下载越快，但网络压力更高。", size=fs(12), color=colors["text_meta"]),
-                    ft.Text("缓存目录留空时使用默认内部目录；程序会按“缓存自动清理周期时间”清理过期缓存。", size=fs(12), color=colors["text_meta"]),
+                    ft.Text(_("默认缓存目录: {default_cache_root_display}", default_cache_root_display=default_cache_root_display), size=fs(12), color=colors["text_meta"]),
+                    ft.Text(_("目录必须存在；FS20/FS24 目录名需为 Community，FS24 Community2024 路径目录名需为 Community2024。"), size=fs(12), color=colors["text_meta"]),
+                    ft.Text(_("一键安装会并发下载，线程越大下载越快，但网络压力更高。"), size=fs(12), color=colors["text_meta"]),
+                    ft.Text(_("缓存目录留空时使用默认内部目录；程序会按“缓存自动清理周期时间”清理过期缓存。"), size=fs(12), color=colors["text_meta"]),
                     ft.Container(height=4),
                     crash_upload_check,
-                    ft.Text("仅上传异常堆栈与版本信息，不包含路径或账号。", size=fs(12), color=colors["text_meta"]),
+                    ft.Text(_("仅上传异常堆栈与版本信息，不包含路径或账号。"), size=fs(12), color=colors["text_meta"]),
                     cycle_subscribe_check,
-                    ft.Text("登录账户后才会生效；订阅后由后台检测新期并发送邮件。", size=fs(12), color=colors["text_meta"]),
+                    ft.Text(_("登录账户后才会生效；订阅后由后台检测新期并发送邮件。"), size=fs(12), color=colors["text_meta"]),
+                    ft.Container(height=4),
+                    language_dd,
                     ft.Container(height=4),
                     ft.Row(spacing=8, controls=[
-                        ft.Text("期数选择器风格：", size=fs(12), color=colors["text_sub"]),
+                        ft.Text(_("期数选择器风格："), size=fs(12), color=colors["text_sub"]),
                         ft.TextButton(
-                            "更改…",
+                            _("更改…"),
                             on_click=lambda _e: show_cycle_picker_style_wizard(force=True),
                         ),
                     ], visible=backup_power_login_valid),
@@ -3185,8 +3206,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
                         controls=[
-                            ft.TextButton("取消", on_click=close_dialog),
-                            ft.Button("保存", bgcolor="#1a73e8", color="#ffffff", on_click=save_click),
+                            ft.TextButton(_("取消"), on_click=close_dialog),
+                            ft.Button(_("保存"), bgcolor="#1a73e8", color="#ffffff", on_click=save_click),
                         ],
                     ),
                 ],
@@ -3195,25 +3216,25 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             )
             refresh_field_status()
         except Exception as exc:
-            snack(f"打开设置失败: {exc}")
+            snack(_("打开设置失败: {exc}", exc=exc))
 
     def on_add_addon_click(_e):
         try:
-            name_field = ft.TextField(label="机型名称", hint_text="例如 PMDG 777-200LR")
-            desc_field = ft.TextField(label="描述", hint_text="显示在卡片副标题")
+            name_field = ft.TextField(label=_("机型名称"), hint_text=_("例如 PMDG 777-200LR"))
+            desc_field = ft.TextField(label=_("描述"), hint_text=_("显示在卡片副标题"))
             cycle_dir_field = ft.TextField(
-                label="cycle.json 所在目录",
+                label=_("cycle.json 所在目录"),
                 hint_text=r"例如 ...\pmdg-aircraft-77l\work\NavigationData",
                 expand=True,
             )
-            browse_cycle_dir_btn = ft.Button("浏览")
+            browse_cycle_dir_btn = ft.Button(_("浏览"))
             sim_dd = ft.Dropdown(
-                label="模拟器",
+                label=_("模拟器"),
                 value=simulator,
                 options=[ft.dropdown.Option(v) for v in active_sims],
             )
             plat_dd = ft.Dropdown(
-                label="平台",
+                label=_("平台"),
                 value=platform,
                 options=[ft.dropdown.Option(v) for v in PLATFORMS],
             )
@@ -3236,12 +3257,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def browse_cycle_dir(_evt) -> None:
                 async def runner() -> None:
                     try:
-                        path = await cycle_dir_picker.get_directory_path(dialog_title="选择 cycle.json 所在目录")
+                        path = await cycle_dir_picker.get_directory_path(dialog_title=_("选择 cycle.json 所在目录"))
                         if path:
                             cycle_dir_field.value = path
                             page.update()
                     except Exception as exc:
-                        err.value = f"选择目录失败: {exc}"
+                        err.value = _("选择目录失败: {exc}", exc=exc)
                         page.update()
 
                 page.run_task(runner)
@@ -3251,27 +3272,27 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def save_click(_evt) -> None:
                 name = name_field.value.strip()
                 if not name:
-                    err.value = "机型名称不能为空。"
+                    err.value = _("机型名称不能为空。")
                     page.update()
                     return
                 sim_value = str(sim_dd.value or "").strip()
                 plat_value = str(plat_dd.value or "").strip()
                 if sim_value not in MSFS_VERSIONS or plat_value not in PLATFORMS:
-                    err.value = "请选择有效的模拟器与平台。"
+                    err.value = _("请选择有效的模拟器与平台。")
                     page.update()
                     return
                 cycle_dir_text = cycle_dir_field.value.strip()
                 if not cycle_dir_text:
-                    err.value = "请选择 cycle.json 所在目录。"
+                    err.value = _("请选择 cycle.json 所在目录。")
                     page.update()
                     return
                 cycle_dir = Path(cycle_dir_text)
                 if not cycle_dir.exists() or not cycle_dir.is_dir():
-                    err.value = "所选目录不存在或不可用。"
+                    err.value = _("所选目录不存在或不可用。")
                     page.update()
                     return
                 if not (cycle_dir / "cycle.json").exists():
-                    err.value = "所选目录下未找到 cycle.json，请选择正确目录。"
+                    err.value = _("所选目录下未找到 cycle.json，请选择正确目录。")
                     page.update()
                     return
 
@@ -3294,7 +3315,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     navdata_subpath="",
                 )
                 if any(addon_key(existing) == addon_key(new_addon) for existing in addons_all):
-                    err.value = "该机型（同模拟器/平台/package）已存在。"
+                    err.value = _("该机型（同模拟器/平台/package）已存在。")
                     page.update()
                     return
                 state.setdefault("addons", []).append(
@@ -3316,36 +3337,36 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
             dlg = custom_modal_container
             open_custom_modal(
-                "添加机型",
+                _("添加机型"),
                 [
                     name_field,
                     desc_field,
                     ft.Row(spacing=8, controls=[sim_dd, plat_dd]),
                     ft.Row(spacing=8, controls=[cycle_dir_field, browse_cycle_dir_btn]),
-                    ft.Text("请直接选择包含 cycle.json 的目录。", size=fs(11), color=colors["text_meta"]),
+                    ft.Text(_("请直接选择包含 cycle.json 的目录。"), size=fs(11), color=colors["text_meta"]),
                     err,
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
                         controls=[
-                            ft.TextButton("取消", on_click=close_dialog),
-                            ft.Button("保存", bgcolor="#1a73e8", color="#ffffff", on_click=save_click),
+                            ft.TextButton(_("取消"), on_click=close_dialog),
+                            ft.Button(_("保存"), bgcolor="#1a73e8", color="#ffffff", on_click=save_click),
                         ],
                     ),
                 ],
                 width=780,
             )
         except Exception as exc:
-            snack(f"打开添加机型失败: {exc}")
+            snack(_("打开添加机型失败: {exc}", exc=exc))
 
     def on_backup_power_click(_e):
         try:
             user_field = ft.TextField(
-                label="账号",
+                label=_("账号"),
                 value=str(state.get("backup_power_username", "")).strip(),
                 expand=True,
             )
             pass_field = ft.TextField(
-                label="密码",
+                label=_("密码"),
                 password=True,
                 can_reveal_password=True,
                 expand=True,
@@ -3367,22 +3388,22 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 if original == filtered:
                     return
                 field.value = filtered
-                input_notice_text.value = f"{field_name}仅支持英文字符，已自动过滤非英文输入。"
+                input_notice_text.value = _("{field_name}仅支持英文字符，已自动过滤非英文输入。", field_name=field_name)
                 if not try_control_update(dlg):
                     page.update()
 
             def on_user_change(_evt=None) -> None:
-                apply_english_only(user_field, "账号")
+                apply_english_only(user_field, _("账号"))
 
             def on_pass_change(_evt=None) -> None:
-                apply_english_only(pass_field, "密码")
+                apply_english_only(pass_field, _("密码"))
 
             user_field.on_change = on_user_change
             pass_field.on_change = on_pass_change
 
             def set_auth_dialog_busy(busy: bool) -> None:
                 login_btn.disabled = busy
-                login_btn.content = "登录中..." if busy else "登录"
+                login_btn.content = _("登录中...") if busy else _("登录")
                 save_btn.disabled = busy
                 if not try_control_update(dlg):
                     page.update()
@@ -3393,7 +3414,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def save_backup_power_settings() -> Path:
                 user = user_field.value.strip()
                 if not user:
-                    raise ValueError("请填写账号。")
+                    raise ValueError(_("请填写账号。"))
                 download_dir_path = ensure_backup_power_download_dir(str(default_backup_power_download_dir(state)), create=True)
                 state["backup_power_download_dir"] = str(download_dir_path)
                 state["backup_power_api_url"] = BACKUP_POWER_LOGIN_URL
@@ -3403,7 +3424,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
             def save_only(_evt) -> None:
                 if login_inflight:
-                    err_text.value = "登录请求进行中，请稍候。"
+                    err_text.value = _("登录请求进行中，请稍候。")
                     if not try_control_update(dlg):
                         page.update()
                     return
@@ -3415,7 +3436,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         page.update()
                     return
                 err_text.value = ""
-                result_text.value = "配置已保存。"
+                result_text.value = _("配置已保存。")
                 if not try_control_update(dlg):
                     page.update()
 
@@ -3439,14 +3460,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     login_inflight = True
                     set_auth_dialog_busy(True)
                 err_text.value = ""
-                result_text.value = "正在检查已保存的 DATA Token..."
+                result_text.value = _("正在检查已保存的 DATA Token...")
                 if not try_control_update(dlg):
                     page.update()
                 try:
                     result = await run_blocking_with_feedback(
                         backup_power_me_request,
                         saved_token,
-                        message="正在校验已保存的 DATA Token",
+                        message=_("正在校验已保存的 DATA Token"),
                         pulse_interval=0.8,
                         show_page_loading=False,
                         show_operation_dialog_ui=False,
@@ -3458,7 +3479,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         f"Token 长度: {token_len}\n"
                         f"登录时间: {state.get('backup_power_last_login_at', '--') or '--'}"
                     )
-                    snack("已检测到有效 DATA Token，无需重新登录")
+                    snack(_("已检测到有效 DATA Token，无需重新登录"))
                     set_backup_power_login_valid(True)
                     if not try_control_update(dlg):
                         page.update()
@@ -3471,10 +3492,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if any(hint in detail.lower() for hint in invalid_hints):
                         clear_saved_backup_power_token()
                         result_text.value = ""
-                        err_text.value = "已保存的 DATA Token 已失效，请重新登录。"
+                        err_text.value = _("已保存的 DATA Token 已失效，请重新登录。")
                     else:
                         result_text.value = ""
-                        err_text.value = f"校验 DATA Token 失败: {exc}"
+                        err_text.value = _("校验 DATA Token 失败: {exc}", exc=exc)
                     set_backup_power_login_valid(False)
                     if not try_control_update(dlg):
                         page.update()
@@ -3487,7 +3508,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def do_login(_evt) -> None:
                 nonlocal login_inflight
                 if login_inflight:
-                    err_text.value = "登录请求进行中，请稍候。"
+                    err_text.value = _("登录请求进行中，请稍候。")
                     if not try_control_update(dlg):
                         page.update()
                     return
@@ -3501,12 +3522,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if reused:
                         return
                     if not user:
-                        err_text.value = "请填写账号。"
+                        err_text.value = _("请填写账号。")
                         if not try_control_update(dlg):
                             page.update()
                         return
                     if not pwd:
-                        err_text.value = "请填写密码。"
+                        err_text.value = _("请填写密码。")
                         if not try_control_update(dlg):
                             page.update()
                         return
@@ -3523,7 +3544,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     # Ensure no stale global progress dialog blocks this auth dialog.
                     close_operation_dialog()
                     err_text.value = ""
-                    result_text.value = "正在登录..."
+                    result_text.value = _("正在登录...")
                     if not try_control_update(dlg):
                         page.update()
 
@@ -3533,7 +3554,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             api,
                             user,
                             pwd,
-                            message="正在登录",
+                            message=_("正在登录"),
                             pulse_interval=0.8,
                             show_page_loading=False,
                             show_operation_dialog_ui=False,
@@ -3553,13 +3574,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             f"Token 长度: {token_len}\n"
                             f"登录时间: {state['backup_power_last_login_at']}"
                         )
-                        snack("账号登录成功")
+                        snack(_("账号登录成功"))
                         if not try_control_update(dlg):
                             page.update()
                         close_dialog()
                     except Exception as exc:
                         result_text.value = ""
-                        err_text.value = f"登录失败: {exc}"
+                        err_text.value = _("登录失败: {exc}", exc=exc)
                         set_backup_power_login_valid(False)
                         if not try_control_update(dlg):
                             page.update()
@@ -3572,7 +3593,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 except Exception as exc:
                     login_inflight = False
                     set_auth_dialog_busy(False)
-                    err_text.value = f"启动登录失败: {exc}"
+                    err_text.value = _("启动登录失败: {exc}", exc=exc)
                     if not try_control_update(dlg):
                         page.update()
 
@@ -3580,27 +3601,27 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             if token_mask:
                 token_mask = f"{token_mask[:4]}...{token_mask[-4:]}" if len(token_mask) > 10 else "***"
             else:
-                token_mask = "未登录"
+                token_mask = _("未登录")
             last_login = str(state.get("backup_power_last_login_at", "")).strip() or "--"
-            save_btn = ft.TextButton("保存配置", on_click=save_only)
-            login_btn = ft.Button("登录", bgcolor="#1a73e8", color="#ffffff", on_click=do_login)
+            save_btn = ft.TextButton(_("保存配置"), on_click=save_only)
+            login_btn = ft.Button(_("登录"), bgcolor="#1a73e8", color="#ffffff", on_click=do_login)
 
             dlg = custom_modal_container
             open_custom_modal(
-                "登录系统",
+                _("登录系统"),
                 [
-                    ft.Text("账号登录", size=fs(14), weight=ft.FontWeight.W_700, color=colors["text_title"]),
+                    ft.Text(_("账号登录"), size=fs(14), weight=ft.FontWeight.W_700, color=colors["text_title"]),
                     ft.Row(spacing=8, controls=[user_field, pass_field]),
-                    ft.Text("账号和密码仅支持英文字符（ASCII）。", size=fs(11), color=colors["text_sub"]),
+                    ft.Text(_("账号和密码仅支持英文字符（ASCII）。"), size=fs(11), color=colors["text_sub"]),
                     input_notice_text,
                     
-                    ft.Text(f"当前 Token: {token_mask}    上次登录: {last_login}", size=fs(11), color=colors["text_sub"]),
+                    ft.Text(_("当前 Token: {token_mask}    上次登录: {last_login}", token_mask=token_mask, last_login=last_login), size=fs(11), color=colors["text_sub"]),
                     err_text,
                     result_text,
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
                         controls=[
-                            ft.TextButton("关闭", on_click=close_dialog),
+                            ft.TextButton(_("关闭"), on_click=close_dialog),
                             save_btn,
                             login_btn,
                         ],
@@ -3611,7 +3632,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             if str(state.get("backup_power_token", "")).strip():
                 page.run_task(try_reuse_saved_token, False, True)
         except Exception as exc:
-            snack(f"登录失败: {exc}")
+            snack(_("登录失败: {exc}", exc=exc))
 
     def on_wasm_paths_click(_e):
         try:
@@ -3620,7 +3641,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             default_bases = wasm_base_candidates(simulator, platform, None)
             default_scan_bases = cycle_json_scan_bases(simulator, platform, None)
             custom_field = ft.TextField(
-                label="自定义扫描目录（每行一个，优先于默认路径）",
+                label=_("自定义扫描目录（每行一个，优先于默认路径）"),
                 multiline=True,
                 min_lines=5,
                 max_lines=8,
@@ -3645,7 +3666,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             def browse_dir(_evt) -> None:
                 async def runner() -> None:
                     try:
-                        path = await picker.get_directory_path(dialog_title="选择自定义 WASM 扫描目录")
+                        path = await picker.get_directory_path(dialog_title=_("选择自定义 WASM 扫描目录"))
                         if not path:
                             return
                         line = path.strip()
@@ -3655,7 +3676,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             custom_field.value = "\n".join(lines)
                             page.update()
                     except Exception as exc:
-                        err.value = f"选择目录失败: {exc}"
+                        err.value = _("选择目录失败: {exc}", exc=exc)
                         page.update()
 
                 page.run_task(runner)
@@ -3672,7 +3693,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 save_state(state)
                 clear_cycle_json_scan_cache()
                 close_dialog()
-                snack(f"WASM 路径已保存: {simulator} / {platform}")
+                snack(_("WASM 路径已保存: {simulator} / {platform}", simulator=simulator, platform=platform))
                 trigger_rebuild(show_loading=True)
 
             def clear_click(_evt) -> None:
@@ -3682,47 +3703,47 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 custom_field.value = ""
                 err.value = ""
                 page.update()
-                snack(f"已清空自定义 WASM 路径: {simulator} / {platform}")
+                snack(_("已清空自定义 WASM 路径: {simulator} / {platform}", simulator=simulator, platform=platform))
                 trigger_rebuild(show_loading=True)
 
             dlg = custom_modal_container
             open_custom_modal(
-                "WASM 路径",
+                _("WASM 路径"),
                 [
-                    ft.Text(f"当前配置: {simulator} / {platform}", size=fs(12), color=colors["text_sub"]),
+                    ft.Text(_("当前配置: {simulator} / {platform}", simulator=simulator, platform=platform), size=fs(12), color=colors["text_sub"]),
                     custom_field,
-                    ft.Row(spacing=8, controls=[ft.Button("浏览并添加", on_click=browse_dir)]),
-                    ft.Text("默认 WASM 候选路径:", size=fs(12), color=colors["text_meta"]),
+                    ft.Row(spacing=8, controls=[ft.Button(_("浏览并添加"), on_click=browse_dir)]),
+                    ft.Text(_("默认 WASM 候选路径:"), size=fs(12), color=colors["text_meta"]),
                     ft.Text("\n".join(f"- {line}" for line in default_bases), size=fs(11), selectable=True),
-                    ft.Text("默认 cycle.json 扫描根路径:", size=fs(12), color=colors["text_meta"]),
+                    ft.Text(_("默认 cycle.json 扫描根路径:"), size=fs(12), color=colors["text_meta"]),
                     ft.Text("\n".join(f"- {line}" for line in default_scan_bases), size=fs(11), selectable=True),
                     err,
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
                         controls=[
-                            ft.TextButton("清空自定义", on_click=clear_click),
-                            ft.TextButton("取消", on_click=close_dialog),
-                            ft.Button("保存", bgcolor="#1a73e8", color="#ffffff", on_click=save_click),
+                            ft.TextButton(_("清空自定义"), on_click=clear_click),
+                            ft.TextButton(_("取消"), on_click=close_dialog),
+                            ft.Button(_("保存"), bgcolor="#1a73e8", color="#ffffff", on_click=save_click),
                         ],
                     ),
                 ],
                 width=860,
             )
         except Exception as exc:
-            snack(f"读取 WASM 路径失败: {exc}")
+            snack(_("读取 WASM 路径失败: {exc}", exc=exc))
 
     def on_log_click(_e):
         try:
-            snack("打开日志")
+            snack(_("打开日志"))
             open_log_overlay()
         except Exception as exc:
-            snack(f"打开日志失败: {exc}")
+            snack(_("打开日志失败: {exc}", exc=exc))
 
     def on_install_status_click(_e):
         try:
             open_install_overlay()
         except Exception as exc:
-            snack(f"打开安装状态失败: {exc}")
+            snack(_("打开安装状态失败: {exc}", exc=exc))
 
     def set_backup_power_login_valid(valid: bool) -> None:
         nonlocal backup_power_login_valid
@@ -3767,12 +3788,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 bgcolor="#1958c4",
                 border_radius=999,
                 padding=ft.Padding.symmetric(horizontal=6, vertical=1),
-                content=ft.Text("最新", size=9, weight=ft.FontWeight.W_700, color="#ffffff"),
+                content=ft.Text(_("最新"), size=9, weight=ft.FontWeight.W_700, color="#ffffff"),
                 visible=is_latest,
             )
             cycle_picker_container.content = ft.Row(spacing=8, tight=True, controls=[
                 ft.Icon(ft.Icons.CALENDAR_MONTH, size=14, color=pill_accent),
-                ft.Text(f"期数 · {cur}", size=12, weight=ft.FontWeight.W_600, color=pill_text),
+                ft.Text(_("期数 · {cur}", cur=cur), size=12, weight=ft.FontWeight.W_600, color=pill_text),
                 latest_badge,
                 ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color=pill_sub),
             ])
@@ -3791,7 +3812,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             cycle_picker_container.border = ft.Border.all(1, pill_border)
             cycle_picker_container.border_radius = 10
             cycle_picker_container.padding = ft.Padding.symmetric(horizontal=12, vertical=6)
-            label_text = f"导航周期  ▾  {cur}{'（最新）' if is_latest else ''}"
+            label_text = f"导航周期  ▾  {cur}{_("（最新）") if is_latest else ''}"
             cycle_picker_container.content = ft.Text(label_text, size=12, weight=ft.FontWeight.W_600, color=pill_text)
         else:  # flat
             cycle_picker_container.bgcolor = pill_bg
@@ -3802,8 +3823,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[
                     ft.Column(spacing=0, tight=True, controls=[
-                        ft.Text("期数", size=10, color=pill_sub),
-                        ft.Text(f"{cur}{'（最新）' if is_latest else ''}", size=12, color=pill_text),
+                        ft.Text(_("期数"), size=10, color=pill_sub),
+                        ft.Text(f"{cur}{_("（最新）") if is_latest else ''}", size=12, color=pill_text),
                     ]),
                     ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color=pill_sub),
                 ],
@@ -3841,7 +3862,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         bgcolor="#1958c4",
                         border_radius=999,
                         padding=ft.Padding.symmetric(horizontal=6, vertical=1),
-                        content=ft.Text("最新", size=9, weight=ft.FontWeight.W_700, color="#ffffff"),
+                        content=ft.Text(_("最新"), size=9, weight=ft.FontWeight.W_700, color="#ffffff"),
                     )
                 )
             return ft.PopupMenuItem(
@@ -3912,10 +3933,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     padding=ft.Padding.symmetric(horizontal=14, vertical=6),
                     content=ft.Row(spacing=8, tight=True, controls=[
                         ft.Icon(ft.Icons.CALENDAR_MONTH, size=14, color="#7fb3ff"),
-                        ft.Text(f"期数 · {sample_cur}", size=12, weight=ft.FontWeight.W_600, color="#cdd9ef"),
+                        ft.Text(_("期数 · {sample_cur}", sample_cur=sample_cur), size=12, weight=ft.FontWeight.W_600, color="#cdd9ef"),
                         ft.Container(bgcolor="#1958c4", border_radius=999,
                                      padding=ft.Padding.symmetric(horizontal=6, vertical=1),
-                                     content=ft.Text("最新", size=9, weight=ft.FontWeight.W_700, color="#ffffff")),
+                                     content=ft.Text(_("最新"), size=9, weight=ft.FontWeight.W_700, color="#ffffff")),
                         ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color="#8ea3c7"),
                     ]),
                 )
@@ -3933,15 +3954,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 return ft.Container(
                     bgcolor="#1958c4", border=ft.Border.all(1, "#2a5ca0"), border_radius=10,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=6),
-                    content=ft.Text(f"导航周期  ▾  {sample_cur}（最新）", size=12, weight=ft.FontWeight.W_600, color="#ffffff"),
+                    content=ft.Text(_("导航周期  ▾  {sample_cur}（最新）", sample_cur=sample_cur), size=12, weight=ft.FontWeight.W_600, color="#ffffff"),
                 )
             return ft.Container(
                 bgcolor="#0f2444", border=ft.Border.all(1, "#21324c"), border_radius=8,
                 padding=ft.Padding.symmetric(horizontal=12, vertical=4),
                 content=ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[
                     ft.Column(spacing=0, tight=True, controls=[
-                        ft.Text("期数", size=10, color="#8ea3c7"),
-                        ft.Text(f"{sample_cur}（最新）", size=12, color="#cdd9ef"),
+                        ft.Text(_("期数"), size=10, color="#8ea3c7"),
+                        ft.Text(_("{sample_cur}（最新）", sample_cur=sample_cur), size=12, color="#cdd9ef"),
                     ]),
                     ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color="#8ea3c7"),
                 ]),
@@ -3971,21 +3992,21 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             padding=20,
             content=ft.Column(spacing=14, tight=True, controls=[
                 ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[
-                    ft.Text("选择期数选择器风格", size=18, weight=ft.FontWeight.BOLD, color=colors["text_title"]),
+                    ft.Text(_("选择期数选择器风格"), size=18, weight=ft.FontWeight.BOLD, color=colors["text_title"]),
                     ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda _e: close()),
                 ]),
-                ft.Text("点击下面任一卡片，将作为顶部期数选择控件的样式（可随时在设置里更改）。",
+                ft.Text(_("点击下面任一卡片，将作为顶部期数选择控件的样式（可随时在设置里更改）。"),
                         size=12, color=colors["text_sub"]),
                 ft.Row(spacing=12, controls=[
-                    card("胶囊（推荐）", "圆角胶囊 + 日历图标 + 最新徽章。", "capsule"),
-                    card("紧凑图标", "最省空间，图标 + 期号。", "icon"),
+                    card(_("胶囊（推荐）"), _("圆角胶囊 + 日历图标 + 最新徽章。"), "capsule"),
+                    card(_("紧凑图标"), _("最省空间，图标 + 期号。"), "icon"),
                 ]),
                 ft.Row(spacing=12, controls=[
-                    card("醒目蓝按钮", "突出选择动作。", "long"),
-                    card("扁平表单风", "上方有「期数」小标签。", "flat"),
+                    card(_("醒目蓝按钮"), _("突出选择动作。"), "long"),
+                    card(_("扁平表单风"), _("上方有「期数」小标签。"), "flat"),
                 ]),
                 ft.Row(alignment=ft.MainAxisAlignment.END, controls=[
-                    ft.TextButton("稍后再选", on_click=lambda _e: pick("capsule")),
+                    ft.TextButton(_("稍后再选"), on_click=lambda _e: pick("capsule")),
                 ]),
             ]),
         )
@@ -4002,7 +4023,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             page.overlay.append(overlay)
             page.update()
         except Exception as exc:
-            log(f"打开风格向导失败：{exc}")
+            log(_("打开风格向导失败：{exc}", exc=exc))
 
     async def refresh_cycle_dropdown_options() -> None:
         nonlocal cycle_dropdown_options_cache, cycle_dropdown_value
@@ -4011,7 +4032,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         try:
             items = await asyncio.to_thread(openlist_list_dir_auto_request, OPENLIST_ROOT_PATH)
         except Exception as exc:
-            log(f"获取 OpenList 期数列表失败: {exc}")
+            log(_("获取 OpenList 期数列表失败: {exc}", exc=exc))
             return
         cycle_dirs: list[str] = []
         for item in items or []:
@@ -4068,8 +4089,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 result_future.set_result(False)
 
         show_confirm_dialog(
-            "确认安装非最新期数",
-            f"当前选择的期数为 {target_cycle}，并非最新期数 {latest}。\n确定要继续安装非最新期数的导航数据吗？",
+            _("确认安装非最新期数"),
+            _("当前选择的期数为 {target_cycle}，并非最新期数 {latest}。\n确定要继续安装非最新期数的导航数据吗？", target_cycle=target_cycle, latest=latest),
             on_yes=_yes,
             on_no=_no,
         )
@@ -4095,35 +4116,35 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if new_token:
                         state["backup_power_token"] = new_token
                         save_state(state)
-                        log("DATA token 已通过 refresh_token 静默续期")
+                        log(_("DATA token 已通过 refresh_token 静默续期"))
                         set_backup_power_login_valid(True)
                         return True
                 except Exception as refresh_exc:
-                    log(f"DATA refresh_token 续期失败: {refresh_exc}")
-            log(f"DATA token 校验失败: {exc}")
+                    log(_("DATA refresh_token 续期失败: {refresh_exc}", refresh_exc=refresh_exc))
+            log(_("DATA token 校验失败: {exc}", exc=exc))
             set_backup_power_login_valid(False)
             if notify_invalid:
-                snack("登录状态已失效，请重新登录。")
+                snack(_("登录状态已失效，请重新登录。"))
             return False
 
     def on_one_click_install_click(e):
         button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
         if is_button_busy(button):
-            open_install_overlay(title=install_overlay_title_text or "安装状态", reset=False)
-            snack("一键安装仍在后台执行，已打开安装状态。")
+            open_install_overlay(title=install_overlay_title_text or _("安装状态"), reset=False)
+            snack(_("一键安装仍在后台执行，已打开安装状态。"))
             return
         reset_operation_dialog_suppression()
-        set_button_busy(button, True, "执行中...")
+        set_button_busy(button, True, _("执行中..."))
 
         async def runner() -> None:
             try:
                 login_ok = await refresh_backup_power_login_validity(notify_invalid=True)
                 if not login_ok:
-                    snack("登录已失效，一键安装不可用，请重新登录或使用「从本地安装」。")
+                    snack(_("登录已失效，一键安装不可用，请重新登录或使用「从本地安装」。"))
                     return
                 scoped_addons = [a for a in addons_all if a.simulator == simulator and a.platform == platform]
                 if not scoped_addons:
-                    snack("当前模拟器/平台没有可更新的机型。")
+                    snack(_("当前模拟器/平台没有可更新的机型。"))
                     return
 
                 fallback_cycle = ""
@@ -4137,19 +4158,19 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if cycle_info and cycle_info.get("cycle_id"):
                         fallback_cycle = detect_airac(str(cycle_info.get("cycle_id", "")))
                 if fallback_cycle in {"", "UNKNOWN"}:
-                    snack("未获取到有效 AIRAC 期数，无法执行一键安装。")
+                    snack(_("未获取到有效 AIRAC 期数，无法执行一键安装。"))
                     return
 
                 if chosen_cycle and detect_airac(chosen_cycle) == fallback_cycle:
                     ok = await confirm_non_latest_cycle(fallback_cycle)
                     if not ok:
-                        append_install_overlay_line("已取消一键安装。")
-                        snack("已取消一键安装。")
+                        append_install_overlay_line(_("已取消一键安装。"))
+                        snack(_("已取消一键安装。"))
                         return
 
-                open_install_overlay(title=f"安装状态 - 一键安装 {simulator} / {platform}", reset=True)
-                append_install_overlay_line(f"一键安装开始: {simulator} / {platform}")
-                append_install_overlay_line(f"默认期数: {fallback_cycle}")
+                open_install_overlay(title=_("安装状态 - 一键安装 {simulator} / {platform}", simulator=simulator, platform=platform), reset=True)
+                append_install_overlay_line(_("一键安装开始: {simulator} / {platform}", simulator=simulator, platform=platform))
+                append_install_overlay_line(_("默认期数: {fallback_cycle}", fallback_cycle=fallback_cycle))
 
                 total = len(scoped_addons)
                 success_count = 0
@@ -4197,9 +4218,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         f"最新已安装{up_to_date_skip_count}，云盘无数据0，跳过{skipped_count}"
                     )
                     if uninstalled_count > 0:
-                        append_install_overlay_line(f"未安装: {uninstalled_count}")
+                        append_install_overlay_line(_("未安装: {uninstalled_count}", uninstalled_count=uninstalled_count))
                     if up_to_date_skip_count > 0:
-                        append_install_overlay_line(f"已是最新（跳过下载）: {up_to_date_skip_count}")
+                        append_install_overlay_line(_("已是最新（跳过下载）: {up_to_date_skip_count}", up_to_date_skip_count=up_to_date_skip_count))
                     append_install_overlay_line(summary)
                     snack(summary)
                     return
@@ -4211,7 +4232,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 max_download_workers = normalize_batch_download_workers(
                     state.get("batch_download_workers", DEFAULT_BATCH_DOWNLOAD_WORKERS)
                 )
-                append_install_overlay_line(f"进入并发下载阶段（线程数: {max_download_workers}）")
+                append_install_overlay_line(_("进入并发下载阶段（线程数: {max_download_workers}）", max_download_workers=max_download_workers))
                 batch_download_root = default_batch_download_cache_dir(state)
                 await asyncio.to_thread(batch_download_root.mkdir, parents=True, exist_ok=True)
 
@@ -4222,12 +4243,12 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if not text:
                         return False
                     hints = (
-                        "未找到与机型匹配的 openlist 压缩包",
-                        "openlist 未找到期数目录",
-                        "openlist 未找到 msfs 目录",
-                        "openlist 未返回可用下载链接",
-                        "目录读取失败 (404",
-                        "文件信息读取失败 (404",
+                        _("未找到与机型匹配的 openlist 压缩包"),
+                        _("openlist 未找到期数目录"),
+                        _("openlist 未找到 msfs 目录"),
+                        _("openlist 未返回可用下载链接"),
+                        _("目录读取失败 (404"),
+                        _("文件信息读取失败 (404"),
                         "not found",
                     )
                     return any(h in text for h in hints)
@@ -4253,7 +4274,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             )
                             archive_path = Path(str(result.get("archive_path", "")).strip())
                             if not archive_path.exists():
-                                raise ValueError(f"下载结果文件不存在: {archive_path}")
+                                raise ValueError(_("下载结果文件不存在: {archive_path}", archive_path=archive_path))
                             append_install_overlay_line(f"[{idx}/{total}] {addon.name}: 下载完成 -> {archive_path.name}")
                             return addon, target, archive_path, None, None
                         except Exception as exc:
@@ -4271,7 +4292,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     ]
                 )
 
-                append_install_overlay_line("进入安装阶段（按顺序执行）")
+                append_install_overlay_line(_("进入安装阶段（按顺序执行）"))
                 for addon, target, archive_path, download_error, download_kind in download_results:
                     if download_error or archive_path is None:
                         if download_kind == "no_data":
@@ -4301,16 +4322,16 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     f"最新已安装{up_to_date_skip_count}，云盘无数据{len(cloud_no_data_addons)}，跳过{skipped_count}"
                 )
                 if uninstalled_count > 0:
-                    append_install_overlay_line(f"未安装: {uninstalled_count}")
+                    append_install_overlay_line(_("未安装: {uninstalled_count}", uninstalled_count=uninstalled_count))
                 if up_to_date_skip_count > 0:
-                    append_install_overlay_line(f"已是最新（跳过下载）: {up_to_date_skip_count}")
+                    append_install_overlay_line(_("已是最新（跳过下载）: {up_to_date_skip_count}", up_to_date_skip_count=up_to_date_skip_count))
                 if cloud_no_data_addons:
                     append_install_overlay_line(f"云盘中无数据: {', '.join(cloud_no_data_addons)}")
                 append_install_overlay_line(summary)
                 snack(summary)
             except Exception as exc:
-                append_install_overlay_line(f"一键安装异常: {exc}")
-                snack(f"一键安装失败: {exc}")
+                append_install_overlay_line(_("一键安装异常: {exc}", exc=exc))
+                snack(_("一键安装失败: {exc}", exc=exc))
             finally:
                 try:
                     await asyncio.to_thread(shutil.rmtree, default_batch_download_cache_dir(state), True)
@@ -4325,7 +4346,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             open_folder(str(LOG_DIR))
         except Exception as exc:
-            snack(f"打开日志文件夹失败: {exc}")
+            snack(_("打开日志文件夹失败: {exc}", exc=exc))
 
     def on_streamer_mode_click(_e):
         nonlocal streamer_mode
@@ -4349,13 +4370,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             btn.bgcolor = colors["filter_active_bg"] if selected else colors["switch_unsel_bg"]
             btn.color = colors["filter_active_fg"] if selected else colors["switch_unsel_fg"]
 
-    streamer_button = build_top_action_button("显示路径" if streamer_mode else "隐藏路径", on_click=on_streamer_mode_click)
+    streamer_button = build_top_action_button(_("显示路径") if streamer_mode else _("隐藏路径"), on_click=on_streamer_mode_click)
     msfs_status_badge = ft.Container(
-        content=ft.Text("MSFS 未运行", size=fs(11), color=colors["text_meta"], weight=ft.FontWeight.W_600),
+        content=ft.Text(_("MSFS 未运行"), size=fs(11), color=colors["text_meta"], weight=ft.FontWeight.W_600),
         bgcolor=colors["panel_soft_bg"],
         padding=ft.Padding.symmetric(horizontal=10, vertical=4),
         border_radius=12,
-        tooltip="MSFS 在线状态（SimConnect / 进程探测）",
+        tooltip=_("MSFS 在线状态（SimConnect / 进程探测）"),
     )
 
     def refresh_msfs_status_badge() -> None:
@@ -4385,14 +4406,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         except Exception:
             pass
     backup_power_login_button = build_top_action_button(
-        "登录下载系统",
+        _("登录下载系统"),
         on_click=on_backup_power_click,
         icon=ft.Icons.AUTO_AWESOME,
         bgcolor=colors["filter_active_bg"],
         color=colors["filter_active_fg"],
     )
     one_click_install_filter_button = ft.Button(
-        "一键安装",
+        _("一键安装"),
         on_click=on_one_click_install_click,
         visible=False,
         height=30,
@@ -4414,7 +4435,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     render_cycle_picker_trigger()
 
     def refresh_streamer_button() -> None:
-        setattr(streamer_button, "text", "显示路径" if streamer_mode else "隐藏路径")
+        setattr(streamer_button, "text", _("显示路径") if streamer_mode else _("隐藏路径"))
         if streamer_mode:
             streamer_button.bgcolor = colors["filter_active_bg"]
             streamer_button.color = colors["filter_active_fg"]
@@ -4505,7 +4526,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         content=ft.Column(
             spacing=6,
             controls=[
-                ft.Text("当前 AIRAC", size=fs(14), weight=ft.FontWeight.W_600, color=colors["text_sub"]),
+                ft.Text(_("当前 AIRAC"), size=fs(14), weight=ft.FontWeight.W_600, color=colors["text_sub"]),
                 airac_id_text,
                 airac_effective_text,
                 airac_next_text,
@@ -4522,7 +4543,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             expand=True,
             spacing=8,
             controls=[
-                ft.Text("已安装机型", size=fs(14), weight=ft.FontWeight.W_600, color=colors["text_sub"]),
+                ft.Text(_("已安装机型"), size=fs(14), weight=ft.FontWeight.W_600, color=colors["text_sub"]),
                 left_list,
             ],
         ),
@@ -4565,8 +4586,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 ft.Column(
                                     spacing=1,
                                     controls=[
-                                        ft.Text("AIRAC 周期管理器", size=fs(26), weight=ft.FontWeight.BOLD, color=colors["text_title"]),
-                                        ft.Text("为你的 MSFS 插件机型更新导航数据库", size=fs(12), color=colors["text_sub"]),
+                                        ft.Text(_("AIRAC 周期管理器"), size=fs(26), weight=ft.FontWeight.BOLD, color=colors["text_title"]),
+                                        ft.Text(_("为你的 MSFS 插件机型更新导航数据库"), size=fs(12), color=colors["text_sub"]),
                                     ],
                                 ),
                                 ft.Container(
@@ -4633,18 +4654,18 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 controls=[
                                     backup_power_login_button,
                                     msfs_status_badge,
-                                    build_top_action_button("设置", on_click=on_settings_click),
-                                    build_top_action_button("添加机型", on_click=on_add_addon_click),
-                                    build_top_action_button("重新扫描", on_click=on_rescan_click),
-                                    build_top_action_button("WASM 路径", on_click=on_wasm_paths_click),
+                                    build_top_action_button(_("设置"), on_click=on_settings_click),
+                                    build_top_action_button(_("添加机型"), on_click=on_add_addon_click),
+                                    build_top_action_button(_("重新扫描"), on_click=on_rescan_click),
+                                    build_top_action_button(_("WASM 路径"), on_click=on_wasm_paths_click),
                                     build_top_action_button("LOG", on_click=on_log_click),
-                                    build_top_action_button("安装状态", on_click=on_install_status_click),
+                                    build_top_action_button(_("安装状态"), on_click=on_install_status_click),
                                 ],
                             ),
                             ft.Container(expand=True),
                             streamer_button,
                             build_top_action_button(
-                                "刷新周期",
+                                _("刷新周期"),
                                 on_click=on_refresh_click,
                                 icon=ft.Icons.REFRESH,
                             ),
@@ -4652,7 +4673,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     ),
                 ),
                 ft.TextField(
-                    hint_text="搜索机型...",
+                    hint_text=_("搜索机型..."),
                     dense=True,
                     height=36,
                     border_radius=10,
@@ -4707,21 +4728,21 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 spacing=8,
                                 controls=[
                                     ft.Button(
-                                        "刷新",
+                                        _("刷新"),
                                         icon=ft.Icons.REFRESH,
                                         bgcolor=colors["panel_soft_bg"],
                                         color=colors["text_meta"],
                                         on_click=lambda _e: (refresh_log_overlay(), update_controls(log_overlay_container)),
                                     ),
                                     ft.Button(
-                                        "打开日志文件夹",
+                                        _("打开日志文件夹"),
                                         icon=ft.Icons.FOLDER_OPEN,
                                         bgcolor=colors["panel_soft_bg"],
                                         color=colors["text_meta"],
                                         on_click=on_open_log_folder_click,
                                     ),
                                     ft.Button(
-                                        "关闭",
+                                        _("关闭"),
                                         icon=ft.Icons.CLOSE,
                                         bgcolor="#b83d4b",
                                         color="#ffffff",
@@ -4757,7 +4778,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     controls=[
                         custom_modal_title,
                         ft.Button(
-                            "关闭",
+                            _("关闭"),
                             icon=ft.Icons.CLOSE,
                             bgcolor="#b83d4b",
                             color="#ffffff",
@@ -4798,7 +4819,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         spacing=10,
                         controls=[
                             ft.ProgressRing(width=24, height=24, stroke_width=3),
-                            ft.Text("处理中", size=fs(14), weight=ft.FontWeight.W_600),
+                            ft.Text(_("处理中"), size=fs(14), weight=ft.FontWeight.W_600),
                         ],
                     ),
                     op_dialog_status,
@@ -4813,7 +4834,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     )
 
     startup_update_skip_btn = ft.Button(
-        "跳过",
+        _("跳过"),
         icon=ft.Icons.SKIP_NEXT,
         bgcolor=colors["panel_soft_bg"],
         color=colors["text_meta"],
@@ -4821,7 +4842,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         visible=False,
     )
     startup_update_download_btn = ft.Button(
-        "前往更新",
+        _("前往更新"),
         icon=ft.Icons.SYSTEM_UPDATE_ALT,
         bgcolor="#1a73e8",
         color="#ffffff",
@@ -4829,7 +4850,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         visible=False,
     )
     startup_update_continue_btn = ft.Button(
-        "继续进入",
+        _("继续进入"),
         icon=ft.Icons.ARROW_FORWARD,
         bgcolor=colors["panel_soft_bg"],
         color=colors["text_meta"],
@@ -4870,7 +4891,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     )
 
     install_force_button = ft.Button(
-        "强制安装",
+        _("强制安装"),
         icon=ft.Icons.WARNING_AMBER_ROUNDED,
         bgcolor="#c67a00",
         color="#ffffff",
@@ -4908,14 +4929,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 controls=[
                                     install_force_button,
                                     ft.Button(
-                                        "清空",
+                                        _("清空"),
                                         icon=ft.Icons.CLEAR_ALL,
                                         bgcolor=colors["panel_soft_bg"],
                                         color=colors["text_meta"],
                                         on_click=clear_install_overlay,
                                     ),
                                     ft.Button(
-                                        "关闭",
+                                        _("关闭"),
                                         icon=ft.Icons.CLOSE,
                                         bgcolor="#b83d4b",
                                         color="#ffffff",
@@ -4994,9 +5015,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     if not fast_reload:
         log("FMS UPDATE MANAGER  started.")
         airac_id_text.value = "..."
-        airac_effective_text.value = "本期数据生效日期：加载中..."
-        airac_next_text.value = "本期数据将于--月--日到期"
-        show_loading_state("正在初始化...")
+        airac_effective_text.value = _("本期数据生效日期：加载中...")
+        airac_next_text.value = _("本期数据将于--月--日到期")
+        show_loading_state(_("正在初始化..."))
 
         async def bootstrap() -> None:
             try:
@@ -5009,23 +5030,23 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         save_state(state)
                         removed = int(cleanup_result.get("removed", 0))
                         days = int(cleanup_result.get("days", DEFAULT_CACHE_CLEANUP_DAYS))
-                        log(f"缓存定期清理完成：清理周期 {days} 天，删除 {removed} 项过期缓存。")
+                        log(_("缓存定期清理完成：清理周期 {days} 天，删除 {removed} 项过期缓存。", days=days, removed=removed))
                 except TimeoutError:
-                    log("缓存清理超时，已跳过。")
+                    log(_("缓存清理超时，已跳过。"))
                 except Exception as exc:
-                    log(f"缓存清理失败：{exc}")
+                    log(_("缓存清理失败：{exc}", exc=exc))
 
                 try:
                     await asyncio.wait_for(run_startup_update_check(), timeout=30)
                 except TimeoutError:
-                    log("启动更新检查超时，已跳过。")
+                    log(_("启动更新检查超时，已跳过。"))
                 except Exception as exc:
-                    log(f"启动更新检查失败：{exc}")
+                    log(_("启动更新检查失败：{exc}", exc=exc))
 
                 try:
                     await asyncio.wait_for(refresh_backup_power_login_validity(notify_invalid=False), timeout=15)
                 except TimeoutError:
-                    log("DATA Token 校验超时，已跳过。")
+                    log(_("DATA Token 校验超时，已跳过。"))
 
                 if state.get("cycle_subscribe_enabled") and str(state.get("backup_power_token", "")).strip():
                     async def _trigger_cycle_check():
@@ -5035,23 +5056,23 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 str(state.get("backup_power_token", "")).strip(),
                             )
                         except Exception as exc:
-                            log(f"AIRAC 订阅启动检查失败：{exc}")
+                            log(_("AIRAC 订阅启动检查失败：{exc}", exc=exc))
                     try:
                         await asyncio.wait_for(_trigger_cycle_check(), timeout=10)
                     except TimeoutError:
-                        log("AIRAC 订阅启动检查超时，已跳过。")
+                        log(_("AIRAC 订阅启动检查超时，已跳过。"))
 
                 try:
                     show_cycle_picker_style_wizard(force=False)
                 except Exception as exc:
-                    log(f"期数选择器风格向导失败：{exc}")
+                    log(_("期数选择器风格向导失败：{exc}", exc=exc))
 
                 try:
                     await asyncio.wait_for(refresh_cycle_async(notify_fail=False), timeout=20)
                 except TimeoutError:
-                    log("AIRAC 刷新超时，已跳过。")
+                    log(_("AIRAC 刷新超时，已跳过。"))
                 except Exception as exc:
-                    log(f"AIRAC 刷新失败：{exc}")
+                    log(_("AIRAC 刷新失败：{exc}", exc=exc))
 
                 try:
                     await asyncio.wait_for(
@@ -5059,14 +5080,14 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         timeout=120,
                     )
                 except TimeoutError:
-                    log("资源扫描超时，已跳过。")
+                    log(_("资源扫描超时，已跳过。"))
                 except Exception as exc:
-                    log(f"资源扫描失败：{exc}")
+                    log(_("资源扫描失败：{exc}", exc=exc))
             finally:
                 try:
                     await rebuild_lists_async(show_loading=False)
                 except Exception as exc:
-                    log(f"启动收尾刷新失败：{exc}")
+                    log(_("启动收尾刷新失败：{exc}", exc=exc))
 
         page.run_task(bootstrap)
     else:
@@ -5078,7 +5099,7 @@ if __name__ == "__main__":
     if not acquire_singleton_lock():
         try:
             from utils import _show_windows_message_box
-            _show_windows_message_box("FMS UPDATE MANAGER", "已检测到另一个实例正在运行。")
+            _show_windows_message_box("FMS UPDATE MANAGER", _("已检测到另一个实例正在运行。"))
         except Exception:
             pass
         sys.exit(0)
