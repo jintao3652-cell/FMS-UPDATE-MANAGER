@@ -213,58 +213,5 @@ def fetch_current_cycle() -> dict | None:
 
 
 
-# --- Unified HTTP helpers (#26) -----------------------------------------------
-# Single place to set timeout / retry / backoff. Existing call sites stay as
-# they are (urlopen direct calls); new code should prefer http_request.
-
-import time as _time
 
 
-def http_request(
-    url: str,
-    *,
-    method: str = "GET",
-    body: bytes | None = None,
-    headers: dict | None = None,
-    timeout: float = 10.0,
-    retries: int = 2,
-    retry_on: tuple = (500, 502, 503, 504),
-    backoff: float = 0.6,
-) -> tuple[int, bytes, dict]:
-    """Tiny wrapper around urllib with retry/backoff.
-
-    Returns (status, body_bytes, response_headers). On HTTPError that is NOT
-    in retry_on, re-raises so the caller still sees the failure code.
-    """
-    final_headers = {"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
-    if headers:
-        final_headers.update(headers)
-    last_exc: Exception | None = None
-    for attempt in range(max(1, retries + 1)):
-        req = Request(url, data=body, headers=final_headers, method=method)
-        try:
-            with urlopen(req, timeout=timeout) as resp:
-                status = int(getattr(resp, "status", 200) or 200)
-                return status, resp.read(), dict(resp.headers.items())
-        except HTTPError as exc:
-            if exc.code not in retry_on or attempt >= retries:
-                raise
-            last_exc = exc
-        except URLError as exc:
-            last_exc = exc
-            if attempt >= retries:
-                raise
-        _time.sleep(backoff * (attempt + 1))
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError("http_request: unreachable")
-
-
-def http_get_json(url: str, *, timeout: float = 10.0, retries: int = 2, headers: dict | None = None) -> Any:
-    status, raw, _h = http_request(url, method="GET", timeout=timeout, retries=retries, headers=headers)
-    if status >= 400:
-        raise URLError(f"http {status} for {url}")
-    try:
-        return json.loads(raw.decode("utf-8", errors="ignore")) if raw else None
-    except Exception:
-        return None

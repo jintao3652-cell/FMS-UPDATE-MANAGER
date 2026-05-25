@@ -44,6 +44,8 @@ OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
     "inibuilds-aircraft-a340": ("inibuilds",),
     "inibuilds-aircraft-a350": ("inibuilds",),
     "aerosoft-aircraft-a346-pro": ("toliss", "dfdv2"),
+    "navigraph-msfs2020-base": ("msfs2020",),
+    "navigraph-msfs2024-base": ("msfs2024",),
 }
 
 
@@ -104,17 +106,15 @@ def backup_power_login_request(api_url: str, username: str, password: str) -> di
                 detail = raw.strip() or str(exc)
             if exc.code == 401:
                 lowered = detail.lower()
-                if "invalid credentials" in lowered or "invalid credential" in lowered:
-                    detail = "账号或密码错误（此处为 DATA 域名登录，不支持 OpenList 账号）"
-                elif not detail:
-                    detail = "账号或密码错误（此处为 DATA 域名登录）"
-                raise ValueError(f"接口返回错误 ({exc.code}): {detail}") from exc
-            raise ValueError(f"接口返回错误 ({exc.code}): {detail}") from exc
+                if "invalid credentials" in lowered or "invalid credential" in lowered or not detail:
+                    detail = "账号或密码错误"
+                raise ValueError(detail) from exc
+            raise ValueError(detail or f"请求失败 ({exc.code})") from exc
         except URLError as exc:
             if attempt < 1:
                 time.sleep(0.6 * (attempt + 1))
                 continue
-            raise ValueError(f"无法连接服务器: {exc}") from exc
+            raise ValueError(f"网络连接失败: {exc}") from exc
 
     try:
         data = json.loads(raw) if raw.strip() else {}
@@ -518,6 +518,10 @@ def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[d
     def is_excluded_name(name_norm: str) -> bool:
         if package == "inibuilds-aircraft-a340" and addon.simulator == "MSFS 2024":
             return any(token in name_norm for token in ("a340600", "a346"))
+        if package == "navigraph-msfs2020-base":
+            return "msfs2024" in name_norm
+        if package == "navigraph-msfs2024-base":
+            return "msfs2020" in name_norm
         return False
 
     def find_by_rules(rules: list[tuple[str, ...]]) -> dict | None:
@@ -562,6 +566,10 @@ def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[d
         hard_rules = [("inibuilds",)]
     elif package == "aerosoft-aircraft-a346-pro":
         hard_rules = [("toliss", "dfdv2"), ("toliss",)]
+    elif package == "navigraph-msfs2020-base":
+        hard_rules = [("msfs2020", "navdata"), ("msfs2020",)]
+    elif package == "navigraph-msfs2024-base":
+        hard_rules = [("msfs2024", "navdata"), ("msfs2024",)]
 
     hard_match = find_by_rules(hard_rules)
     if hard_match is not None:

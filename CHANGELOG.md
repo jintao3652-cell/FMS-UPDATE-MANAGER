@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.7 - 2026-05-25
+
+### 客户端
+
+- **版本号显示**：窗口标题在“本软件正在测试中”之后追加当前版本号（[main_flet.py:356](main_flet.py#L356)），便于截图反馈时一眼看到版本。
+- **CSS 737CL 导航数据路径修正**：`Community\css-core\Data\NavData\Inactive` 路径写入与扫描适配 MSFS 2020/2024（注意是 Community 路径，不是 wasm）。
+- **修复**：`main_flet.py` 中 `_normalize_path_list` 引用未导入的问题，从 `catalog` 一并 re-export。
+
+### 服务器
+
+- **后台「待审核用户」新增「拒绝并删除」按钮**：复用 `DELETE /api/users/{id}`，二次确认；之前只有「通过」没有「拒绝」（[deploy/admin_panel/app/ui.py](deploy/admin_panel/app/ui.py)）。
+- **独立的「重置密码」站点（端口 3091）**：从注册页拆出，新增 [deploy/register_ui/app/reset.py](deploy/register_ui/app/reset.py)，复用 `_proxy_to_auth` 转发到 `auth_api`；含 Cloudflare Turnstile 校验、邮箱→验证码→新密码三步流程。`docker-compose.yml` 增 `reset_ui` 服务（镜像复用 `./register_ui`），暴露 3091 端口；Dockerfile `EXPOSE 3090 3091`。注册页底部加“前往重置密码页面”链接（自动用当前 hostname + 3091）。
+
 ## 1.0.6 - 2026-05-18
 
 ### 客户端
@@ -22,6 +35,14 @@
 ### 客户端打包
 
 - **#11 MSI 代码签名脚手架**：新增 [installer/sign_msi.bat](installer/sign_msi.bat) 调 `signtool sign /fd SHA256 /td SHA256` + 自动 verify；证书路径与密码走 `FMS_SIGN_PFX` / `FMS_SIGN_PWD` 环境变量。[installer/build_signed.bat](installer/build_signed.bat) 串联 PyInstaller → 签 EXE → WiX 打 MSI → 签 MSI 全流程；MSI 版本号从 `FMS_APP_VERSION` 注入到 `*.wxs`。
+
+### 修复
+
+- **拆分后遗漏的导入**：`_addon_from_dict` / `enabled_simulators` / `addon_key` / `addon_status` / `compute_filtered_addon_entries` / `resolve_target_dir` / `resolve_wasm_target_by_folder_name` / `is_valid_community_path` / `is_valid_community2024_path` / `clear_cycle_json_scan_cache` / `custom_wasm_scan_paths` / `read_cycle_from_dir` / `cycle_json_scan_bases` / `default_community_base` / `wasm_base_candidates` 统一从对应 sibling 模块补回 `from state/catalog import (...)`，修复一系列 `NameError` 启动崩溃。
+- **GitHub 通信容错**：`network.github_api_json` 加 3 次重试 + 指数退避（0.8s / 1.6s），timeout 8s → 15s；`fetch_current_cycle` 同样加 3 次重试，抵御 `SSL: UNEXPECTED_EOF_WHILE_READING` 这类瞬时连接中断。
+- **本地源目录不再只识别 `*.zip`**：扫描改用 `is_supported_archive_file`，覆盖 zip / 7z / rar / tar / tar.gz / tar.bz2 / tar.xz / SFX exe，与底层解压能力一致。
+- **直播模式按钮文案**：路径可见时按钮显示"隐藏路径"，路径已隐藏时显示"显示路径"（之前两处文案反了）。
+- **默认窗口尺寸**：1260×700 → 1400×750。
 
 ## 1.0.5 - 2026-05-15
 

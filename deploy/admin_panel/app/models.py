@@ -51,6 +51,20 @@ class EmailLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    note: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    max_uses: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class AdminAudit(Base):
     __tablename__ = "admin_audit"
 

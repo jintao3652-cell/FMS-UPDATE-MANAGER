@@ -7,14 +7,13 @@ from fastapi.responses import HTMLResponse
 from .config import settings
 
 
-app = FastAPI(title="FMS Register UI", version="1.0.0")
+app = FastAPI(title="FMS Password Reset UI", version="1.0.0")
 
 
 _PROXY_HOP_HEADERS = {
     "host", "content-length", "connection", "keep-alive", "transfer-encoding",
     "upgrade", "proxy-authenticate", "proxy-authorization", "te", "trailers",
 }
-
 _PROXY_RESPONSE_STRIP_HEADERS = _PROXY_HOP_HEADERS | {"content-encoding"}
 
 
@@ -52,16 +51,6 @@ async def proxy_public(path: str, request: Request):
     return await _proxy_to_auth(request, f"api/public/{path}")
 
 
-@app.api_route("/api/me", methods=["GET"])
-async def proxy_me(request: Request):
-    return await _proxy_to_auth(request, "api/me")
-
-
-@app.api_route("/api/navdata/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def proxy_navdata(path: str, request: Request):
-    return await _proxy_to_auth(request, f"api/navdata/{path}")
-
-
 _site_key_cache: dict = {"value": "", "ts": 0.0}
 _CACHE_TTL = 60.0
 
@@ -73,8 +62,7 @@ def get_site_key() -> str:
     try:
         r = httpx.get(f"{settings.auth_api_url.rstrip('/')}/api/public/turnstile_site_key", timeout=5)
         if r.status_code == 200:
-            data = r.json()
-            _site_key_cache["value"] = (data.get("site_key") or "").strip()
+            _site_key_cache["value"] = (r.json().get("site_key") or "").strip()
         else:
             _site_key_cache["value"] = ""
     except Exception:
@@ -85,11 +73,11 @@ def get_site_key() -> str:
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "service": "fms-register-ui"}
+    return {"ok": True, "service": "fms-password-reset-ui"}
 
 
 @app.get("/", response_class=HTMLResponse)
-def register_page():
+def reset_page():
     site_key = get_site_key()
     auth_base = settings.register_public_auth_url.rstrip("/")
     if site_key:
@@ -100,38 +88,39 @@ def register_page():
         turnstile_widget = ""
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FMS 用户注册</title>
+<title>FMS 重置密码</title>
 {turnstile_script}
 <style>
 body{{margin:0;font-family:Segoe UI,Arial,sans-serif;background:radial-gradient(circle at top,#0f203c 0,#07111f 40%,#050b14 100%);color:#e6eefc;min-height:100vh}}
-.wrap{{max-width:580px;margin:0 auto;padding:40px 20px}}
-.card{{background:rgba(12,23,41,.92);border:1px solid #21324c;border-radius:16px;padding:24px;box-shadow:0 18px 46px rgba(0,0,0,.32);backdrop-filter:blur(14px)}}
+.wrap{{max-width:520px;margin:0 auto;padding:48px 20px}}
+.card{{background:rgba(12,23,41,.92);border:1px solid #21324c;border-radius:16px;padding:28px;box-shadow:0 18px 46px rgba(0,0,0,.32);backdrop-filter:blur(14px)}}
 h2{{margin:0 0 12px;letter-spacing:.4px}}
-p{{color:#8ea3c7;line-height:1.6}}
-input,button{{width:100%;box-sizing:border-box;margin:8px 0;padding:12px 14px;border-radius:12px;border:1px solid #21324c;background:#09111d;color:#e6eefc;font-size:14px}}
+p{{color:#8ea3c7;line-height:1.6;font-size:14px}}
+input,button{{width:100%;box-sizing:border-box;margin:8px 0;padding:12px 14px;border-radius:12px;border:1px solid #21324c;background:#09111d;color:#e6eefc;font-size:14px;font-family:inherit}}
+input:focus{{outline:none;border-color:#29b6f6}}
 button{{background:linear-gradient(180deg,#29b6f6,#1958c4);border:none;cursor:pointer;font-weight:600;color:#fff}}
 button:hover{{filter:brightness(1.08)}}
+button.secondary{{background:linear-gradient(180deg,#2a3a55,#1a2538)}}
 .row{{display:flex;gap:10px;align-items:center}}
 .row>*{{flex:1}}
-.msg{{white-space:pre-wrap;background:#09111d;border:1px solid #21324c;border-radius:12px;padding:12px;min-height:56px;margin-top:10px;color:#cdd9ef;font-size:13px}}
+.row>button{{max-width:170px}}
+.msg{{white-space:pre-wrap;background:#09111d;border:1px solid #21324c;border-radius:12px;padding:12px;min-height:48px;margin-top:12px;color:#cdd9ef;font-size:13px}}
 .tiny{{font-size:12px;color:#8ea3c7;margin-top:8px}}
-.cf-turnstile-slot{{margin:10px 0}}
+.cf-turnstile-slot{{margin:12px 0}}
 </style></head><body>
 <div class="wrap"><div class="card">
-<h2>FMS 用户注册</h2>
-<p>请填写姓名、邮箱和密码。先获取邮箱验证码，再完成注册。</p>
-<input id="name" placeholder="姓名">
-<input id="email" placeholder="邮箱">
-<input id="password" placeholder="密码" type="password">
+<h2>FMS 重置密码</h2>
+<p>请输入您的注册邮箱，发送验证码后设置新密码。</p>
+<input id="email" placeholder="注册邮箱" autocomplete="email">
 <div class="row">
   <input id="email_code" placeholder="邮箱验证码">
-  <button style="max-width:160px" onclick="sendCode()">发送验证码</button>
+  <button onclick="sendResetCode()">发送验证码</button>
 </div>
-<input id="invite_code" placeholder="邀请码（如需要）" style="display:none">
+<input id="new_password" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password">
 <div class="cf-turnstile-slot">{turnstile_widget}</div>
-<button onclick="registerUser()">注册</button>
+<button onclick="resetPassword()">重置密码</button>
 <div id="out" class="msg">等待操作。</div>
-<div class="tiny">如果收不到验证码，请联系管理员检查 SMTP 配置。<br>忘记密码？请前往 <a id="reset_link" href="#" style="color:#29b6f6">重置密码页面</a>。</div>
+<div class="tiny">如果收不到验证码，请检查垃圾箱或联系管理员检查 SMTP 配置。</div>
 </div></div>
 <script>
 const AUTH_BASE = {auth_base!r};
@@ -145,67 +134,30 @@ function resetTurnstile(){{
     }}
   }}catch(e){{}}
 }}
-function endpoint(path){{
-  if(AUTH_BASE) return AUTH_BASE + path;
-  return path;
-}}
-async function sendCode(){{
+function endpoint(path){{ return AUTH_BASE ? AUTH_BASE + path : path; }}
+async function sendResetCode(){{
   const token=getTurnstileToken();
   if(!token){{out.textContent='请先完成人机验证（Turnstile）';return;}}
-  const payload={{name:document.getElementById('name').value.trim(),email:document.getElementById('email').value.trim(),turnstile_token:token}};
+  const payload={{email:document.getElementById('email').value.trim(),turnstile_token:token}};
   try{{
-    const r=await fetch(endpoint('/api/auth/register/code'),{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+    const r=await fetch(endpoint('/api/auth/password_reset/code'),{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
     out.textContent=await r.text();
   }}catch(e){{out.textContent='请求失败：'+e;}}
   resetTurnstile();
 }}
-async function registerUser(){{
+async function resetPassword(){{
   const token=getTurnstileToken();
   if(!token){{out.textContent='请先完成人机验证（Turnstile）';return;}}
-  const payload={{name:document.getElementById('name').value.trim(),email:document.getElementById('email').value.trim(),password:document.getElementById('password').value,email_code:document.getElementById('email_code').value.trim(),turnstile_token:token}};
-  const inv=document.getElementById('invite_code');
-  if(inv && inv.style.display !== 'none'){{
-    const v=inv.value.trim();
-    if(!v){{out.textContent='请输入邀请码';resetTurnstile();return;}}
-    payload.invite_code=v;
-  }}
+  const payload={{
+    email:document.getElementById('email').value.trim(),
+    email_code:document.getElementById('email_code').value.trim(),
+    new_password:document.getElementById('new_password').value,
+    turnstile_token:token,
+  }};
   try{{
-    const r=await fetch(endpoint('/api/auth/register'),{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
-    const txt=await r.text();
-    let parsed=null;
-    try{{ parsed=JSON.parse(txt); }}catch(_){{}}
-    if(parsed && parsed.pending_approval){{
-      out.textContent='注册成功，账号待管理员审核后方可登录。';
-    }}else{{
-      out.textContent=txt;
-    }}
+    const r=await fetch(endpoint('/api/auth/password_reset'),{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+    out.textContent=await r.text();
   }}catch(e){{out.textContent='请求失败：'+e;}}
   resetTurnstile();
 }}
-async function loadRegisterPolicy(){{
-  try{{
-    const r=await fetch(endpoint('/api/public/register_policy'));
-    if(!r.ok) return;
-    const p=await r.json();
-    if(p && p.require_invite_code){{
-      const inv=document.getElementById('invite_code');
-      if(inv) inv.style.display='block';
-    }}
-  }}catch(e){{}}
-}}
-loadRegisterPolicy();
-(function(){{
-  const link=document.getElementById('reset_link');
-  if(link){{
-    try{{
-      const u=new URL(window.location.href);
-      u.port='3091';
-      u.pathname='/';
-      u.search='';
-      u.hash='';
-      link.href=u.toString();
-    }}catch(e){{ link.href='http://'+window.location.hostname+':3091/'; }}
-  }}
-}})();
-
 </script></body></html>"""

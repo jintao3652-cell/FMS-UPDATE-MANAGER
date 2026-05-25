@@ -18,13 +18,11 @@ ROAMING_DIR = Path(os.path.expandvars(r"%APPDATA%")) / APP_NAME
 LOCAL_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%")) / APP_NAME
 STATE_FILE = ROAMING_DIR / "state.json"
 BACKUP_DIR = LOCAL_DIR / "backups"
-APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.6").strip() or "1.0.6"
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.7").strip() or "1.0.7"
 MSFS_VERSIONS = ["MSFS 2024", "MSFS 2020"]
 PLATFORMS = ["Xbox/MS Store", "Steam"]
 THEME_LIGHT = "Light Mode"
 THEME_DARK = "Dark Mode"
-THEME_OLED = "OLED Black"
-THEME_MORANDI = "Morandi"
 DEFAULT_BATCH_DOWNLOAD_WORKERS = 4
 DEFAULT_CACHE_CLEANUP_DAYS = 7
 CACHE_CLEANUP_DAY_OPTIONS = (1, 3, 7, 14, 30)
@@ -50,7 +48,7 @@ DEFAULT_ADDON_FAMILIES = [
     ("Flight Sim Labs 321", "Flight Sim Labs A321", "fslabs-aircraft-a321", ""),
     ("RJ Professional", "Just Flight RJ Professional", "justflight-aircraft-rj", ""),
     ("FSS ERJ", "FSS ERJ series", "fss-aircraft-e19x", ""),
-    ("CSS 737CL", "CSS 737 Classic series", "css-core", ""),
+    ("CSS 737CL", "CSS 737 Classic series", "css-core", r"Data\NavData\Inactive"),
     ("FYCYC C919", "FYCYC C919", "fycyc-aircraft-c919x", ""),
     ("iFly 737 MAX8", "iFly 737 MAX series", "ifly-aircraft-737max8", r"Data\navdata\Permanent"),
 ]
@@ -225,6 +223,24 @@ def default_addons() -> list[dict]:
             "navdata_subpath": r"work\FMSData",
         }
     )
+    for sim, package in (
+        ("MSFS 2020", "navigraph-msfs2020-base"),
+        ("MSFS 2024", "navigraph-msfs2024-base"),
+    ):
+        label = f"{sim} Navigation Data"
+        desc = f"Navigraph base navdata for {sim}"
+        for plat in ("Steam", "Xbox/MS Store"):
+            addons.append(
+                {
+                    "name": label,
+                    "description": desc,
+                    "simulator": sim,
+                    "platform": plat,
+                    "target_path": "",
+                    "package_name": package,
+                    "navdata_subpath": "",
+                }
+            )
     return addons
 
 
@@ -232,14 +248,18 @@ def to_addon(item: dict) -> Addon | None:
     if not isinstance(item, dict):
         return None
     try:
+        package_name = str(item.get("package_name", "")).strip()
+        navdata_subpath = str(item.get("navdata_subpath", "")).strip()
+        if package_name.lower() == "css-core" and not navdata_subpath:
+            navdata_subpath = r"Data\NavData\Inactive"
         return Addon(
             name=str(item.get("name", "")).strip(),
             description=str(item.get("description", "")).strip(),
             simulator=str(item.get("simulator", "")).strip(),
             platform=str(item.get("platform", "")).strip(),
             target_path=str(item.get("target_path", "")).strip(),
-            package_name=str(item.get("package_name", "")).strip(),
-            navdata_subpath=str(item.get("navdata_subpath", "")).strip(),
+            package_name=package_name,
+            navdata_subpath=navdata_subpath,
         )
     except Exception:
         return None
@@ -383,14 +403,18 @@ def save_state(state: dict) -> None:
 
 
 def _addon_from_dict(item: dict) -> Addon:
+    package_name = str(item.get("package_name", "")).strip()
+    navdata_subpath = str(item.get("navdata_subpath", "")).strip()
+    if package_name.lower() == "css-core" and not navdata_subpath:
+        navdata_subpath = r"Data\NavData\Inactive"
     return Addon(
         name=str(item.get("name", "")).strip(),
         description=str(item.get("description", "")).strip(),
         simulator=str(item.get("simulator", "")).strip(),
         platform=str(item.get("platform", "")).strip(),
         target_path=str(item.get("target_path", "")).strip(),
-        package_name=str(item.get("package_name", "")).strip(),
-        navdata_subpath=str(item.get("navdata_subpath", "")).strip(),
+        package_name=package_name,
+        navdata_subpath=navdata_subpath,
     )
 
 

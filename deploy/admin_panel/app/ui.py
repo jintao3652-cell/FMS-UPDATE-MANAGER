@@ -1002,7 +1002,7 @@ async function loadPendingUsers(){
     tb.innerHTML = '';
     for(const u of (d.items||[])){
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td>'+u.id+'</td><td>'+escapeHtml(u.username)+'</td><td>'+escapeHtml(u.email)+'</td><td>'+escapeHtml(u.created_at||'')+'</td><td><button class="btn primary" onclick="approvePending('+u.id+')">通过</button></td>';
+      tr.innerHTML = '<td>'+u.id+'</td><td>'+escapeHtml(u.username)+'</td><td>'+escapeHtml(u.email)+'</td><td>'+escapeHtml(u.created_at||'')+'</td><td><div class="actions"><button class="btn primary" onclick="approvePending('+u.id+')">通过</button> <button class="btn danger" onclick="rejectPending('+u.id+','+JSON.stringify(u.username)+')">拒绝并删除</button></div></td>';
       tb.appendChild(tr);
     }
   }catch(e){ showMsg('pending_msg', e.message||String(e), false); }
@@ -1012,6 +1012,20 @@ async function approvePending(id){
   try{
     const r = await apiFetch('/api/users/' + id, {method:'PATCH', body: JSON.stringify({enabled:true})});
     if(!r.ok){ showMsg('pending_msg','启用失败', false); return; }
+    loadPendingUsers();
+  }catch(e){ showMsg('pending_msg', e.message||String(e), false); }
+}
+
+async function rejectPending(id, name){
+  if(!confirm('确认拒绝并删除用户 ' + name + ' ？此操作不可恢复。')) return;
+  try{
+    const r = await apiFetch('/api/users/' + id, {method:'DELETE'});
+    if(!r.ok){
+      const t = await r.text();
+      showMsg('pending_msg','拒绝失败：' + t, false);
+      return;
+    }
+    showMsg('pending_msg','已拒绝并删除用户 ' + name, true);
     loadPendingUsers();
   }catch(e){ showMsg('pending_msg', e.message||String(e), false); }
 }

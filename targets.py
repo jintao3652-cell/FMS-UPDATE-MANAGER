@@ -339,41 +339,29 @@ def addon_requires_cycle_name_match(addon: Addon) -> bool:
     )
 
 
-def cycle_name_needs_path_disambiguation(addon: Addon, cycle_name: str) -> bool:
-    hay = cycle_name.strip().lower()
-    compact = re.sub(r"[^a-z0-9]+", "", hay)
-    package = addon.package_name.strip().lower()
-    name = addon.name.strip().lower()
-
-    if package.startswith("pmdg-aircraft-73") or "pmdg 737" in name:
-        if "pmdg" not in hay:
-            return False
-        specific_tokens = ("736", "737600", "737700", "738", "737800", "739", "737900")
-        return not any(token in compact for token in specific_tokens)
-
-    if package.startswith("pmdg-aircraft-77") or "pmdg 777" in name:
-        if "pmdg" not in hay:
-            return False
-        specific_tokens = (
-            "77l",
-            "777200lr",
-            "200lr",
-            "77er",
-            "777200er",
-            "200er",
-            "77f",
-            "777f",
-            "freighter",
-            "77w",
-            "777300er",
-            "300er",
-        )
-        return not any(token in compact for token in specific_tokens)
-    return False
-
-
-
 def is_a346_addon(addon: Addon) -> bool:
     package_name = addon.package_name.strip().lower()
     addon_name = addon.name.strip().lower()
     return package_name == "aerosoft-aircraft-a346-pro" or "a340-600" in addon_name
+
+
+def is_sim_base_navdata_addon(addon: Addon) -> bool:
+    return addon.package_name.strip().lower() in ("navigraph-msfs2020-base", "navigraph-msfs2024-base")
+
+
+def sim_base_navdata_required_subfolders(addon: Addon) -> tuple[str, ...]:
+    pkg = addon.package_name.strip().lower()
+    if pkg == "navigraph-msfs2020-base":
+        return ("navigraph-navdata", "navigraph-navdata-base")
+    if pkg == "navigraph-msfs2024-base":
+        return ("navigraph-nav-jepp", "navigraph-nav-base")
+    return ()
+
+
+def sim_base_navdata_archive_keyword(addon: Addon) -> str:
+    pkg = addon.package_name.strip().lower()
+    if pkg == "navigraph-msfs2020-base":
+        return "msfs2020"
+    if pkg == "navigraph-msfs2024-base":
+        return "msfs2024"
+    return ""

@@ -47,6 +47,7 @@ from archive import (
     copy_payload_dir_to_target,
     cleanup_temp_dir,
     inspect_extracted_cycle_payload,
+    inspect_sim_base_payload,
     inspect_zip_cycle_payload,
     is_supported_archive_file,
     load_cycle_json_payload,
@@ -110,8 +111,6 @@ from state import (
     STATE_FILE,
     THEME_DARK,
     THEME_LIGHT,
-    THEME_OLED,
-    THEME_MORANDI,
     community_key,
     default_addons,
     load_state,
@@ -147,7 +146,9 @@ from targets import (
     is_a346_addon,
     is_ifly_737max8_addon,
     is_pmdg_737_addon,
+    is_sim_base_navdata_addon,
     path_matches_addon_signature,
+    sim_base_navdata_required_subfolders,
     text_matches_addon_signature,
 )
 from catalog import (
@@ -183,6 +184,7 @@ from catalog import (
     status_badge_style,
     status_dot_color,
     CYCLE_JSON_SCAN_CACHE,
+    _normalize_path_list,
 )
 from utils import (
     CYCLES_API_URL,
@@ -352,8 +354,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     }
     colors = get_colors(theme_name)
 
-    page.title = "FMS UPDATE MANAGER  | 本软件正在测试中，有问题请联系 qq=168329908"
-    page.theme_mode = ft.ThemeMode.DARK if theme_name in (THEME_DARK, THEME_OLED) else ft.ThemeMode.LIGHT
+    page.title = f"FMS UPDATE MANAGER  | 本软件正在测试中，有问题请联系 qq=168329908 | 当前版本 {format_version_display(APP_VERSION)}"
+    page.theme_mode = ft.ThemeMode.DARK if theme_name == THEME_DARK else ft.ThemeMode.LIGHT
     page.bgcolor = colors["root_bg"]
     page.padding = 12
     try:
@@ -432,7 +434,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         simulator = active_sims[0]
     if platform not in PLATFORMS:
         platform = PLATFORMS[0]
-    if theme_name not in (THEME_LIGHT, THEME_DARK, THEME_OLED, THEME_MORANDI):
+    if theme_name not in (THEME_LIGHT, THEME_DARK):
         theme_name = THEME_LIGHT
 
     def ensure_required_community_paths() -> bool:
@@ -700,8 +702,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         platform_segment_row.controls.append(platform_buttons[option])
 
     theme_segment_row = ft.Row(spacing=4)
-    theme_labels = {THEME_LIGHT: "浅色", THEME_DARK: "深邃蓝", THEME_OLED: "OLED 黑", THEME_MORANDI: "莫兰迪"}
-    for option in (THEME_LIGHT, THEME_DARK, THEME_OLED, THEME_MORANDI):
+    theme_labels = {THEME_LIGHT: "白色", THEME_DARK: "黑色"}
+    for option in (THEME_LIGHT, THEME_DARK):
         theme_buttons[option] = build_segment_button(theme_labels[option], lambda v=option: set_theme(v))
         theme_segment_row.controls.append(theme_buttons[option])
 
@@ -1444,6 +1446,70 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if progress_callback is not None:
             progress_callback(f"开始安装: {addon.name}")
         extracted_root: Path | None = None
+        if is_sim_base_navdata_addon(addon):
+            try:
+                required = sim_base_navdata_required_subfolders(addon)
+                if not required:
+                    raise ValueError("机型未配置必需的导航数据子目录列表")
+                if progress_callback is not None:
+                    progress_callback("正在解压压缩包...")
+                extracted_root = extract_archive_to_temp(archive_path, progress_callback=progress_callback)
+                if progress_callback is not None:
+                    progress_callback("正在校验压缩包结构...")
+                payload_info = inspect_sim_base_payload(extracted_root, required)
+                if not payload_info:
+                    raise ValueError(
+                        f"压缩包结构无效：顶层未找到必需目录 {', '.join(required)}"
+                    )
+                payload_dir = Path(str(payload_info.get("payload_dir", "")).strip())
+                install_base = target
+                if not install_base.exists() or not install_base.is_dir():
+                    raise ValueError(f"Community 目录不可用: {install_base}")
+
+                backup_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                safe_name = addon.name.replace("/", "_").replace("\\", "_")
+                addon_backup_root = BACKUP_DIR / safe_name
+                addon_backup_root.mkdir(parents=True, exist_ok=True)
+                backup_path = addon_backup_root / backup_stamp
+                backed_up = False
+                copied_files = 0
+                for sub in required:
+                    src = payload_dir / sub
+                    if not src.exists():
+                        for entry in payload_dir.iterdir():
+                            if entry.is_dir() and entry.name.lower() == sub.lower():
+                                src = entry
+                                break
+                    if not src.exists() or not src.is_dir():
+                        raise ValueError(f"压缩包缺少子目录: {sub}")
+                    dest = install_base / sub
+                    if dest.exists():
+                        if progress_callback is not None:
+                            progress_callback(f"备份旧 {sub}...")
+                        backup_path.mkdir(parents=True, exist_ok=True)
+                        shutil.copytree(dest, backup_path / sub, dirs_exist_ok=True)
+                        backed_up = True
+                        shutil.rmtree(dest, ignore_errors=True)
+                    if progress_callback is not None:
+                        progress_callback(f"安装 {sub}...")
+                    shutil.copytree(src, dest)
+                    copied_files += sum(1 for _ in dest.rglob("*") if _.is_file())
+
+                if progress_callback is not None:
+                    progress_callback(f"安装完成: {addon.name}")
+                return {
+                    "backup_path": str(backup_path) if backed_up else "",
+                    "airac": detect_airac(archive_name) or "UNKNOWN",
+                    "install_base": str(install_base),
+                    "install_root": str(install_base),
+                    "extracted_files": copied_files,
+                    "archive_name": archive_name,
+                    "extracted_root": str(extracted_root) if extracted_root else "",
+                }
+            except Exception:
+                if extracted_root is not None:
+                    cleanup_temp_dir(extracted_root)
+                raise
         try:
             archive_kind = _archive_kind(archive_path)
             payload_airac = "UNKNOWN"
@@ -1591,19 +1657,34 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     if archive_airac != "UNKNOWN"
                     else f"导航数据更新成功，但 cycle.json 未提供 AIRAC，当前周期: {result['airac']}"
                 )
+                is_base_navdata = addon.package_name.strip().lower() in {
+                    "navigraph-msfs2020-base",
+                    "navigraph-msfs2024-base",
+                }
+                if is_base_navdata:
+                    archive_cycle_msg = "安装完成"
                 append_install_overlay_line(archive_cycle_msg)
                 if show_result_dialog:
-                    snack(f"{addon.name} 更新完成: AIRAC {result['airac']}")
+                    if is_base_navdata:
+                        snack(f"{addon.name} 安装完成")
+                    else:
+                        snack(f"{addon.name} 更新完成: AIRAC {result['airac']}")
                 if show_result_dialog:
-                    show_info_dialog(
-                        "更新完成",
-                        (
-                            f"{addon.name} 已更新到 AIRAC {result['airac']}。\n"
-                            f"安装文件数: {result['extracted_files']}\n"
-                            f"来源压缩包: {result['archive_name']}\n"
-                            f"{archive_cycle_msg}"
-                        ),
-                    )
+                    if is_base_navdata:
+                        show_info_dialog(
+                            "安装完成",
+                            f"{addon.name} 安装完成。\n安装文件数: {result['extracted_files']}",
+                        )
+                    else:
+                        show_info_dialog(
+                            "更新完成",
+                            (
+                                f"{addon.name} 已更新到 AIRAC {result['airac']}。\n"
+                                f"安装文件数: {result['extracted_files']}\n"
+                                f"来源压缩包: {result['archive_name']}\n"
+                                f"{archive_cycle_msg}"
+                            ),
+                        )
                 return True
             except Exception as exc:
                 append_install_overlay_line(f"安装失败: {exc}")
@@ -1669,6 +1750,22 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             append_install_overlay_line(f"目标目录: {target}")
 
         try:
+            if is_sim_base_navdata_addon(addon):
+                append_install_overlay_line("机型为 MSFS 导航数据库，跳过 cycle.json 校验")
+                archive_airac = detect_airac(archive_path.name) or "UNKNOWN"
+                await rebuild_lists_async(show_loading=False)
+                ok_task = start_archive_update(
+                    addon,
+                    target,
+                    archive_path,
+                    archive_path.name,
+                    archive_airac,
+                    show_result_dialog=show_result_dialog,
+                    run_in_background=False,
+                )
+                if ok_task is not None:
+                    return await ok_task
+                return False
             log(f"{addon.name}: parsing archive payload from {archive_path.name}")
             append_install_overlay_line("正在提取 cycle.json 并校验...")
             archive_payload = await run_blocking_with_feedback(
@@ -1741,6 +1838,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             log(f"{addon.name}: update canceled by user ({reason})")
             append_install_overlay_line(f"用户取消安装（{reason}）")
 
+        if is_sim_base_navdata_addon(addon):
+            return await continue_install_async()
+
         cycle_name_norm = cycle_name.strip().lower()
         if not cycle_name_norm:
             if not allow_force_prompt:
@@ -1764,6 +1864,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 f"{addon.name}: cycle name mismatch detected (archive='{cycle_name}', addon='{addon.name}'), "
                 "waiting for user confirmation"
             )
+            append_install_overlay_line(
+                f"检测到非本机型导航数据（压缩包: {cycle_name}，当前机型: {addon.name}），等待用户确认"
+            )
             set_force_install_prompt(
                 f"机型名称不匹配（压缩包: {cycle_name}，当前机型: {addon.name}）",
                 on_force=continue_install,
@@ -1782,6 +1885,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         show_result_dialog: bool = True,
         reset_overlay: bool = True,
         wait_for_install: bool = False,
+        local_only: bool = False,
     ) -> bool:
         try:
             addon = find_addon_by_key(addon_key_value)
@@ -1828,15 +1932,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 return False
             token = str(state.get("backup_power_token", "")).strip()
             can_auto_download = False
-            if token and is_default_catalog_addon(addon):
+            if not local_only and token and is_default_catalog_addon(addon):
                 can_auto_download = await refresh_backup_power_login_validity(notify_invalid=False)
                 if not can_auto_download:
-                    manual_only_message = "DATA(data.cnrpg.top) 登录状态失效，仅支持手动选择本地压缩包安装。"
-                    log(f"{addon.name}: {manual_only_message}")
+                    log(f"{addon.name}: DATA token invalid, falling back to local archive picker")
                     if bulk_mode:
                         append_install_overlay_line(f"{addon.name}: 跳过（登录失效，批量模式不允许手动选包）")
                         return False
-                    snack(manual_only_message)
             if can_auto_download and is_default_catalog_addon(addon):
                 cycle_id = detect_airac(str(forced_cycle_id or ""))
                 if cycle_id in {"", "UNKNOWN"} and current_cycle_info and current_cycle_info.get("cycle_id"):
@@ -1859,7 +1961,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             open_install_overlay(title=f"安装状态 - {addon.name}", reset=reset_overlay)
                     else:
                         open_install_overlay(title=f"安装状态 - {addon.name}", reset=reset_overlay)
-                    append_install_overlay_line(f"自动模式: OpenList /{cycle_id}/MSFS")
+                    append_install_overlay_line(f"自动模式: 期数 {cycle_id}")
                     saved_token_for_hash = str(state.get("backup_power_token", "")).strip()
                     expected_hash = ""
                     if saved_token_for_hash:
@@ -1878,7 +1980,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         addon,
                         cycle_id,
                         download_dir,
-                        message=f"正在从 OpenList 下载 {addon.name}",
+                        message=f"正在下载 {addon.name}",
                         pulse_interval=0.25,
                         progress_callback=append_install_overlay_line,
                         provide_progress_callback=True,
@@ -1935,7 +2037,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         finally:
             set_button_busy(trigger_button, False)
 
-    def make_update_click_handler(addon_key_value: str):
+    def make_update_click_handler(addon_key_value: str, *, local_only: bool = False):
         def _handler(e) -> None:
             button = e.control if isinstance(getattr(e, "control", None), ft.Button) else None
             if is_button_busy(button):
@@ -1943,7 +2045,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 return
             reset_operation_dialog_suppression()
             set_button_busy(button, True, "处理中...")
-            chosen_cycle = (cycle_dropdown_value or "").strip() if backup_power_login_valid else ""
+            chosen_cycle = (cycle_dropdown_value or "").strip() if (backup_power_login_valid and not local_only) else ""
 
             async def _runner():
                 try:
@@ -1953,7 +2055,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                             snack("已取消本次安装。")
                             set_button_busy(button, False)
                             return
-                    await on_update_navdata_click(addon_key_value, button, forced_cycle_id=chosen_cycle or None)
+                    await on_update_navdata_click(addon_key_value, button, forced_cycle_id=chosen_cycle or None, local_only=local_only)
                 finally:
                     pass
 
@@ -2373,7 +2475,10 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                     ),
                                 ],
                             ),
-                            ft.Text(f"已安装: {installed}    API: {api}", size=fs(12), color=colors["card_meta"]),
+                            ft.Text(
+                                "已安装" if addon.package_name.strip().lower() in {"navigraph-msfs2020-base", "navigraph-msfs2024-base"}
+                                else f"已安装: {installed}    API: {api}",
+                                size=fs(12), color=colors["card_meta"]),
                             ft.Text(
                                 "未检测到 cycle.json / cycle_info.txt\n建议点击「打开目录」检查文件夹结构",
                                 size=fs(11),
@@ -2394,6 +2499,18 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                             padding=ft.Padding.symmetric(horizontal=10, vertical=0),
                                         ),
                                         on_click=make_update_click_handler(key),
+                                    ),
+                                    ft.Button(
+                                        "从本地安装",
+                                        icon=ft.Icons.FOLDER_ZIP,
+                                        bgcolor=colors["panel_soft_bg"],
+                                        color=colors["text_title"],
+                                        height=30,
+                                        style=ft.ButtonStyle(
+                                            padding=ft.Padding.symmetric(horizontal=10, vertical=0),
+                                        ),
+                                        on_click=make_update_click_handler(key, local_only=True),
+                                        visible=backup_power_login_valid,
                                     ),
                                     ft.Button(
                                         "打开目录",
@@ -2745,6 +2862,54 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 color=colors["text_meta"],
                 selectable=True,
             )
+
+            def _make_sim_dot(running: bool) -> ft.Container:
+                return ft.Container(
+                    width=10, height=10, border_radius=5,
+                    bgcolor="#2ecc71" if running else "#e74c3c",
+                )
+            try:
+                import simconnect_status as _scs
+                _scs_initial = _scs.latest_status()
+            except Exception:
+                _scs_initial = None
+            sim_2020_dot = _make_sim_dot(bool(getattr(_scs_initial, "running_2020", False)))
+            sim_2024_dot = _make_sim_dot(bool(getattr(_scs_initial, "running_2024", False)))
+            sim_2020_text = ft.Text(
+                "MSFS 2020：" + ("运行中" if getattr(_scs_initial, "running_2020", False) else "未运行"),
+                size=fs(12), color=colors["text_sub"],
+            )
+            sim_2024_text = ft.Text(
+                "MSFS 2024：" + ("运行中" if getattr(_scs_initial, "running_2024", False) else "未运行"),
+                size=fs(12), color=colors["text_sub"],
+            )
+            sim_status_row = ft.Row(spacing=16, controls=[
+                ft.Row(spacing=6, controls=[sim_2020_dot, sim_2020_text]),
+                ft.Row(spacing=6, controls=[sim_2024_dot, sim_2024_text]),
+            ])
+
+            async def _settings_sim_status_loop() -> None:
+                while True:
+                    try:
+                        import simconnect_status as _scs2
+                        st = _scs2.latest_status()
+                        sim_2020_dot.bgcolor = "#2ecc71" if st.running_2020 else "#e74c3c"
+                        sim_2024_dot.bgcolor = "#2ecc71" if st.running_2024 else "#e74c3c"
+                        sim_2020_text.value = "MSFS 2020：" + ("运行中" if st.running_2020 else "未运行")
+                        sim_2024_text.value = "MSFS 2024：" + ("运行中" if st.running_2024 else "未运行")
+                        try:
+                            update_controls(sim_2020_dot, sim_2024_dot, sim_2020_text, sim_2024_text)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    await asyncio.sleep(2.0)
+
+            try:
+                page.run_task(_settings_sim_status_loop)
+            except Exception:
+                pass
+
             check_update_btn = ft.Button("检查更新")
             open_release_btn = ft.TextButton("打开发布页", visible=False)
             latest_release_url = f"https://github.com/{normalize_github_repo(GITHUB_RELEASE_REPO)}/releases"
@@ -2991,6 +3156,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     ft.Text(f"当前平台: {platform}", size=fs(12), color=colors["text_sub"]),
                     ft.Row(spacing=10, controls=[current_version_text, check_update_btn, open_release_btn]),
                     update_check_status,
+                    sim_status_row,
                     ft.Row(spacing=16, controls=[has20_check, has24_check]),
                     ft.Row(spacing=8, controls=[fs20_field, browse20_btn]),
                     ft.Row(spacing=8, controls=[fs24_field, browse24_btn]),
@@ -3000,13 +3166,13 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     ft.Row(spacing=8, controls=[cache_cleanup_days_dd]),
                     ft.Text(f"默认缓存目录: {default_cache_root_display}", size=fs(12), color=colors["text_meta"]),
                     ft.Text("目录必须存在；FS20/FS24 目录名需为 Community，FS24 Community2024 路径目录名需为 Community2024。", size=fs(12), color=colors["text_meta"]),
-                    ft.Text("一键安装会并发下载，线程越大下载越快，但网络与服务器压力更高。", size=fs(12), color=colors["text_meta"]),
+                    ft.Text("一键安装会并发下载，线程越大下载越快，但网络压力更高。", size=fs(12), color=colors["text_meta"]),
                     ft.Text("缓存目录留空时使用默认内部目录；程序会按“缓存自动清理周期时间”清理过期缓存。", size=fs(12), color=colors["text_meta"]),
                     ft.Container(height=4),
                     crash_upload_check,
                     ft.Text("仅上传异常堆栈与版本信息，不包含路径或账号。", size=fs(12), color=colors["text_meta"]),
                     cycle_subscribe_check,
-                    ft.Text("登录账户后才会生效；订阅状态会同步到服务器，由后端 cron 检测新期后发邮件。", size=fs(12), color=colors["text_meta"]),
+                    ft.Text("登录账户后才会生效；订阅后由后台检测新期并发送邮件。", size=fs(12), color=colors["text_meta"]),
                     ft.Container(height=4),
                     ft.Row(spacing=8, controls=[
                         ft.Text("期数选择器风格：", size=fs(12), color=colors["text_sub"]),
@@ -3585,10 +3751,16 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             style = "capsule"
         cur = cycle_dropdown_value or "--"
         is_latest = bool(cycle_dropdown_options_cache) and cur == cycle_dropdown_options_cache[0]
+        is_dark = theme_name == THEME_DARK
+        pill_bg = "#243247" if is_dark else "#ffffff"
+        pill_border = "#3a4d6e" if is_dark else "#dadce0"
+        pill_text = "#eef4ff" if is_dark else "#1a1f2e"
+        pill_sub = "#9bb2cf" if is_dark else "#5f6368"
+        pill_accent = "#8ab4ff" if is_dark else "#1a73e8"
 
         if style == "capsule":
-            cycle_picker_container.bgcolor = "#ffffff"
-            cycle_picker_container.border = ft.Border.all(1, "#dadce0")
+            cycle_picker_container.bgcolor = pill_bg
+            cycle_picker_container.border = ft.Border.all(1, pill_border)
             cycle_picker_container.border_radius = 999
             cycle_picker_container.padding = ft.Padding.symmetric(horizontal=14, vertical=6)
             latest_badge = ft.Container(
@@ -3599,41 +3771,41 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 visible=is_latest,
             )
             cycle_picker_container.content = ft.Row(spacing=8, tight=True, controls=[
-                ft.Icon(ft.Icons.CALENDAR_MONTH, size=14, color="#1a73e8"),
-                ft.Text(f"期数 · {cur}", size=12, weight=ft.FontWeight.W_600, color="#1a1f2e"),
+                ft.Icon(ft.Icons.CALENDAR_MONTH, size=14, color=pill_accent),
+                ft.Text(f"期数 · {cur}", size=12, weight=ft.FontWeight.W_600, color=pill_text),
                 latest_badge,
-                ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color="#5f6368"),
+                ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color=pill_sub),
             ])
         elif style == "icon":
-            cycle_picker_container.bgcolor = "#ffffff"
-            cycle_picker_container.border = ft.Border.all(1, "#dadce0")
+            cycle_picker_container.bgcolor = pill_bg
+            cycle_picker_container.border = ft.Border.all(1, pill_border)
             cycle_picker_container.border_radius = 10
             cycle_picker_container.padding = ft.Padding.symmetric(horizontal=10, vertical=5)
             cycle_picker_container.content = ft.Row(spacing=6, tight=True, controls=[
-                ft.Icon(ft.Icons.EVENT_NOTE, size=16, color="#1a73e8"),
-                ft.Text(cur, size=11, color="#1a1f2e"),
-                ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=14, color="#5f6368"),
+                ft.Icon(ft.Icons.EVENT_NOTE, size=16, color=pill_accent),
+                ft.Text(cur, size=11, color=pill_text),
+                ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=14, color=pill_sub),
             ])
         elif style == "long":
-            cycle_picker_container.bgcolor = "#ffffff"
-            cycle_picker_container.border = ft.Border.all(1, "#dadce0")
+            cycle_picker_container.bgcolor = pill_bg
+            cycle_picker_container.border = ft.Border.all(1, pill_border)
             cycle_picker_container.border_radius = 10
             cycle_picker_container.padding = ft.Padding.symmetric(horizontal=12, vertical=6)
             label_text = f"导航周期  ▾  {cur}{'（最新）' if is_latest else ''}"
-            cycle_picker_container.content = ft.Text(label_text, size=12, weight=ft.FontWeight.W_600, color="#1a1f2e")
+            cycle_picker_container.content = ft.Text(label_text, size=12, weight=ft.FontWeight.W_600, color=pill_text)
         else:  # flat
-            cycle_picker_container.bgcolor = "#ffffff"
-            cycle_picker_container.border = ft.Border.all(1, "#dadce0")
+            cycle_picker_container.bgcolor = pill_bg
+            cycle_picker_container.border = ft.Border.all(1, pill_border)
             cycle_picker_container.border_radius = 8
             cycle_picker_container.padding = ft.Padding.symmetric(horizontal=12, vertical=4)
             cycle_picker_container.content = ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[
                     ft.Column(spacing=0, tight=True, controls=[
-                        ft.Text("期数", size=10, color="#5f6368"),
-                        ft.Text(f"{cur}{'（最新）' if is_latest else ''}", size=12, color="#1a1f2e"),
+                        ft.Text("期数", size=10, color=pill_sub),
+                        ft.Text(f"{cur}{'（最新）' if is_latest else ''}", size=12, color=pill_text),
                     ]),
-                    ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color="#5f6368"),
+                    ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color=pill_sub),
                 ],
             )
         if cycle_picker_button is not None:
@@ -3651,15 +3823,17 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         def make_item(c: str) -> ft.PopupMenuItem:
             is_current = c == cycle_dropdown_value
             is_latest = c == latest
+            is_dark = theme_name == THEME_DARK
+            item_text_color = "#ffffff" if is_dark else "#000000"
             row_controls: list[ft.Control] = [
                 ft.Icon(
                     ft.Icons.CHECK if is_current else ft.Icons.RADIO_BUTTON_UNCHECKED,
                     size=14,
-                    color="#1a73e8" if is_current else "#9aa6b8",
+                    color="#8ab4ff" if is_current else ("#9bb2cf" if is_dark else "#9aa6b8"),
                 ),
                 ft.Text(c, size=13,
                         weight=ft.FontWeight.W_700 if is_current else ft.FontWeight.W_500,
-                        color="#000000"),
+                        color=item_text_color),
             ]
             if is_latest:
                 row_controls.append(
@@ -3895,7 +4069,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
         show_confirm_dialog(
             "确认安装非最新期数",
-            f"当前选择的期数为 {target_cycle}，并非服务器最新期数 {latest}。\n确定要继续安装非最新期数的导航数据吗？",
+            f"当前选择的期数为 {target_cycle}，并非最新期数 {latest}。\n确定要继续安装非最新期数的导航数据吗？",
             on_yes=_yes,
             on_no=_no,
         )
@@ -3945,7 +4119,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             try:
                 login_ok = await refresh_backup_power_login_validity(notify_invalid=True)
                 if not login_ok:
-                    snack("DATA(data.cnrpg.top) 登录状态失效时仅支持手动本地压缩包安装；一键安装不可用。")
+                    snack("登录已失效，一键安装不可用，请重新登录或使用「从本地安装」。")
                     return
                 scoped_addons = [a for a in addons_all if a.simulator == simulator and a.platform == platform]
                 if not scoped_addons:
@@ -4176,6 +4350,40 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             btn.color = colors["filter_active_fg"] if selected else colors["switch_unsel_fg"]
 
     streamer_button = build_top_action_button("显示路径" if streamer_mode else "隐藏路径", on_click=on_streamer_mode_click)
+    msfs_status_badge = ft.Container(
+        content=ft.Text("MSFS 未运行", size=fs(11), color=colors["text_meta"], weight=ft.FontWeight.W_600),
+        bgcolor=colors["panel_soft_bg"],
+        padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+        border_radius=12,
+        tooltip="MSFS 在线状态（SimConnect / 进程探测）",
+    )
+
+    def refresh_msfs_status_badge() -> None:
+        try:
+            import simconnect_status as _scs
+            st = _scs.latest_status()
+        except Exception:
+            return
+        label = st.headline()
+        if st.connected:
+            bg = colors["filter_active_bg"]
+            fg = colors["filter_active_fg"]
+        elif st.running:
+            bg = "#7a47e8"
+            fg = "#ffffff"
+        else:
+            bg = colors["panel_soft_bg"]
+            fg = colors["text_meta"]
+        msfs_status_badge.bgcolor = bg
+        try:
+            msfs_status_badge.content.value = label
+            msfs_status_badge.content.color = fg
+        except Exception:
+            pass
+        try:
+            update_controls(msfs_status_badge)
+        except Exception:
+            pass
     backup_power_login_button = build_top_action_button(
         "登录下载系统",
         on_click=on_backup_power_click,
@@ -4268,7 +4476,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def set_theme(value: str) -> None:
         nonlocal theme_name
-        if value not in (THEME_LIGHT, THEME_DARK, THEME_OLED, THEME_MORANDI) or value == theme_name:
+        if value not in (THEME_LIGHT, THEME_DARK) or value == theme_name:
             return
         theme_name = value
         state["theme"] = theme_name
@@ -4424,6 +4632,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                                 wrap=True,
                                 controls=[
                                     backup_power_login_button,
+                                    msfs_status_badge,
                                     build_top_action_button("设置", on_click=on_settings_click),
                                     build_top_action_button("添加机型", on_click=on_add_addon_click),
                                     build_top_action_button("重新扫描", on_click=on_rescan_click),
@@ -4762,6 +4971,24 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     refresh_streamer_button()
     refresh_segment_visuals()
+    try:
+        import simconnect_status as _scs
+        _scs.start_status_worker(interval=2.5)
+    except Exception:
+        pass
+
+    async def _msfs_status_loop() -> None:
+        while True:
+            try:
+                refresh_msfs_status_badge()
+            except Exception:
+                pass
+            await asyncio.sleep(2.5)
+
+    try:
+        page.run_task(_msfs_status_loop)
+    except Exception:
+        pass
     on_filter_change("All", rebuild=False)
     set_backup_power_login_valid(False)
     if not fast_reload:

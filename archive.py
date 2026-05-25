@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import struct
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -206,6 +207,38 @@ def read_cycle_from_payload(payload) -> str:
 def read_cycle_json(json_path: Path) -> str:
     payload = load_cycle_json_payload(json_path)
     return read_cycle_from_payload(payload)
+
+
+def inspect_sim_base_payload(extracted_root: Path, required_subfolders: tuple[str, ...]) -> dict | None:
+    """Locate a directory inside extracted_root that contains ALL required top-level subfolders.
+
+    Returns {payload_dir, required} or None if no such directory exists.
+    """
+    if not required_subfolders:
+        return None
+    required_lower = tuple(s.lower() for s in required_subfolders)
+    candidates: list[tuple[int, Path]] = []
+    try:
+        all_dirs = [extracted_root] + [p for p in extracted_root.rglob("*") if p.is_dir()]
+    except Exception:
+        all_dirs = [extracted_root]
+    for d in all_dirs:
+        try:
+            names = {entry.name.lower(): entry for entry in d.iterdir() if entry.is_dir()}
+        except Exception:
+            continue
+        if all(req in names for req in required_lower):
+            try:
+                depth = len(d.relative_to(extracted_root).parts)
+            except ValueError:
+                depth = 999
+            candidates.append((depth, d))
+    if not candidates:
+        return None
+    candidates.sort()
+    payload_dir = candidates[0][1]
+    return {"payload_dir": str(payload_dir), "required": list(required_subfolders)}
+
 
 
 def inspect_extracted_cycle_payload(extracted_root: Path) -> dict | None:

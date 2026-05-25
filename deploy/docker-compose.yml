@@ -75,6 +75,19 @@ services:
     ports:
       - "3090:3090"
 
+  reset_ui:
+    build: ./register_ui
+    restart: always
+    depends_on:
+      auth_api:
+        condition: service_started
+    environment:
+      APP_AUTH_API_URL: http://auth_api:17306
+      APP_REGISTER_PUBLIC_AUTH_URL: ${APP_REGISTER_PUBLIC_AUTH_URL}
+    command: ["uvicorn", "app.reset:app", "--host", "0.0.0.0", "--port", "3091"]
+    ports:
+      - "3091:3091"
+
   backup:
     build: ./backup
     restart: always

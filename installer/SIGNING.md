@@ -81,6 +81,37 @@ installer\build_signed.bat              REM release (FMS_UPDATE_MANAGER.spec)
 installer\build_signed.bat beta         REM beta    (FMS_UPDATE_MANAGER_beta.spec)
 ```
 
+## Self-signed certificate (dev / pipeline smoke test)
+
+If you don't have a CA-issued code-signing certificate yet, generate a
+self-signed one to exercise the pipeline end-to-end. End users will still
+see "Unknown publisher" SmartScreen warnings, so this is **not** a
+substitute for a real cert in a public release.
+
+```powershell
+# from the project root (PowerShell)
+.\installer\make_selfsigned_cert.ps1 -OutDir .\.secrets -CurrentUserStore
+# It will prompt for a password; remember it — it becomes FMS_SIGN_PWD.
+
+$env:FMS_SIGN_PFX = "$PWD\.secrets\fms_selfsigned.pfx"
+$env:FMS_SIGN_PWD = "<the password you entered>"
+.\installer\build_signed.bat
+```
+
+Optional: locally trust the self-signed cert so SmartScreen treats your
+own installer as known (admin PowerShell):
+
+```powershell
+Import-Certificate -FilePath .\.secrets\fms_selfsigned.pfx `
+  -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+Import-Certificate -FilePath .\.secrets\fms_selfsigned.pfx `
+  -CertStoreLocation Cert:\LocalMachine\Root
+```
+
+For a real release, replace `FMS_SIGN_PFX` with a cert from a public CA
+(DigiCert / SSL.com / Sectigo / Certum) and ideally also pin its
+thumbprint via `FMS_TRUSTED_CERT_THUMBPRINTS` (see above).
+
 The wrapper runs the full pipeline:
 
 1. PyInstaller (`--clean`) builds the EXE

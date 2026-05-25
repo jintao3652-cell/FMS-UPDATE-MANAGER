@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import unquote
 from urllib.request import Request, urlopen
 
-from state import APP_NAME, APP_VERSION, BACKUP_DIR, INSTALLER_COMMANDLINE_HINTS, INSTALLER_EXECUTABLE_NAME, LOCAL_DIR, ROAMING_DIR, THEME_DARK, THEME_MORANDI, THEME_OLED
+from state import APP_NAME, APP_VERSION, BACKUP_DIR, INSTALLER_COMMANDLINE_HINTS, INSTALLER_EXECUTABLE_NAME, LOCAL_DIR, ROAMING_DIR, THEME_DARK
 
 CYCLES_API_URL = "https://fmsdata.api.navigraph.com/v3/cycles"
 LOG_DIR = ROAMING_DIR / "logs"

@@ -3,13 +3,17 @@ from PyInstaller.utils.hooks import collect_data_files
 
 datas = [('assets', 'assets')]
 datas += collect_data_files('flet')
+try:
+    datas += collect_data_files('SimConnect')
+except Exception:
+    pass
 
 a = Analysis(
     ['main_flet.py'],
     pathex=[],
-    binaries=[('7z.exe', '.'), ('7z.dll', '.')],
+    binaries=[('7z.exe', '.'), ('7z.dll', '.'), ('SimConnect.dll', '.')],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=['psutil', 'SimConnect', 'simconnect_status'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

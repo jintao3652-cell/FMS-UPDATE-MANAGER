@@ -11,7 +11,9 @@ from targets import (
     is_a346_addon,
     is_ifly_737max8_addon,
     is_pmdg_737_addon,
+    is_sim_base_navdata_addon,
     path_matches_addon_signature,
+    sim_base_navdata_required_subfolders,
     text_matches_addon_signature,
 )
 from utils import detect_airac
@@ -61,7 +63,17 @@ def addon_prefers_community(addon: Addon) -> bool:
     if package == "ifly-aircraft-737max8":
         # MSFS 2024 iFly package is currently installed under WASM paths in user setups.
         return addon.simulator != "MSFS 2024"
+    if package == "css-core":
+        return True
     return False
+
+
+def effective_navdata_subpath(addon: Addon) -> str:
+    if addon.navdata_subpath:
+        return addon.navdata_subpath
+    if addon.package_name.strip().lower() == "css-core":
+        return r"Data\NavData\Inactive"
+    return ""
 
 
 def fixed_relative_path(addon: Addon) -> str:
@@ -472,6 +484,14 @@ def read_a346_builtin_cycle(addon: Addon, state: dict | None = None) -> tuple[st
 
 
 def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
+    if is_sim_base_navdata_addon(addon):
+        if state is None:
+            return None
+        for base in community_base_candidates(state, addon.simulator, addon.platform):
+            p = Path(base)
+            if p.exists() and p.is_dir():
+                return p
+        return None
     if is_fenix_addon(addon):
         p = Path(fenix_navdata_path())
         if p.exists():
@@ -542,6 +562,14 @@ def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
 
 
 def addon_status(addon: Addon, api_cycle: str, state: dict | None = None) -> tuple[str, str, str, str]:
+    if is_sim_base_navdata_addon(addon):
+        target = resolve_target_dir(addon, state)
+        if target and target.exists():
+            required = sim_base_navdata_required_subfolders(addon)
+            if required and all((target / sub).exists() for sub in required):
+                return "UP TO DATE", "INSTALLED", api_cycle, str(target)
+            return "NOT INSTALLED", "NONE", api_cycle, str(target)
+        return "NOT INSTALLED", "NONE", api_cycle, ""
     target = resolve_target_dir(addon, state)
     if target and target.exists():
         installed = read_cycle_from_dir(target)

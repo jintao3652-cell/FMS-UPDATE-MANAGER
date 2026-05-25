@@ -50,7 +50,7 @@ if "%VARIANT%"=="" (
   set "MSI_NAME=FMS_UPDATE_MANAGER_beta_Installer.msi"
 )
 
-if "%FMS_APP_VERSION%"=="" set "FMS_APP_VERSION=1.0.6"
+if "%FMS_APP_VERSION%"=="" set "FMS_APP_VERSION=1.0.7"
 
 echo [build] variant=%VARIANT% version=%FMS_APP_VERSION%
 echo [build] spec=%SPEC%
