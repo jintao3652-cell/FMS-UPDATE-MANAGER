@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.8 - 2026-05-25
+
+### 客户端
+
+- **首次启动语言选择**：state.json 不存在 `locale` 键时弹出语言选择卡片（中/英），写入 state 后进入正常流程；覆盖 MSI / 便携 zip / 解压版所有分发渠道（[main_flet.py:444](main_flet.py#L444)）。
+- **便携模式**：exe 同级存在 `portable.flag` 时，自动把 `ROAMING_DIR` / `LOCAL_DIR` / `STATE_FILE` / `BACKUP_DIR` / `LOG_DIR` / `EXTRACTED_DIR` 重定向到 `data/{roaming,local}/`（[state.py:21](state.py#L21)）。标题栏追加 "便携模式 / Portable" 标识。构建脚本同时产出 `*_portable.zip`。
+- **7z 解压精细进度条**：在原 `-bsp1` 文本输出基础上新增正则解析 `42% xxx` 并实时驱动 `ProgressBar`；100% 立即收起，下次解压自动重置（[main_flet.py:2240](main_flet.py#L2240)）。
+- **实时日志面板美化**：根据日志内容自动识别严重级别（error/warn/success/info/default），分别染色：红/黄/绿/蓝/默认；活动日志面板、安装状态面板、底部 log_list 三处统一应用。
+- **CSS 不使用 Community2024**：[catalog.py:addon_uses_community_2024](catalog.py#L285)；CSS 安装/扫描只走主 Community 路径。
+- **A346 OpenList 命名识别增强**：硬规则新增 `as346 / aerosoft+a346 / aerosoft+a340 / a346`，hints 加入 `as346 / a346 / aerosofta346 / aerosoft`；`AS346_NavData_2506.zip`、`AerosoftA346_xxx.zip` 等命名都能精确匹配（[openlist.py:46](openlist.py#L46)）。
+- **AIRAC 空值自动重试**：`refresh_cycle_async` 拿到空 / `--` / `UNKNOWN` 时后台自动重试，3 次，间隔 3/8/20s；只刷 cycle，不影响其他控件（[main_flet.py:2685](main_flet.py#L2685)）。
+- **增量更新机制**（仅便携模式）：
+  - 文件级 diff：客户端下载 `manifest.json` + Ed25519 签名 → 验签 → 对比本地 sha256 → 仅从 `release.zip` 抽取改动文件
+  - **updater 模式复用主 exe**：主程序以 `--updater <install_dir> <staging_dir> <pid>` 模式启动一个临时副本，等主进程退出后替换文件、启动新版本、30s 心跳检测、失败自动回滚到 `.update_backup/`，成功后清理（[incremental_update.py](incremental_update.py)）
+  - **纯 Python Ed25519 验签**（RFC8032 实现），客户端不引入 cryptography 运行时依赖
+  - 失败回退到原有 MSI 强更流程
+  - MSI 安装模式跳过增量更新（兼容性，避免 MSI 数据库失同步）
+
+### 客户端打包
+
+- **`build_signed.bat` 新增 manifest + release.zip 生成**：PyInstaller / 签名 / WiX / MSI 签名之后追加便携 zip + manifest.json + manifest.json.sig + release.zip 步骤；私钥从 `FMS_MANIFEST_PRIVKEY` 环境变量读取；`FMS_SKIP_PORTABLE=1` / `FMS_SKIP_INCREMENTAL=1` 可单独跳过。
+- **新增工具脚本**：[tools/gen_keys.py](tools/gen_keys.py) 生成 Ed25519 密钥对；[tools/build_manifest.py](tools/build_manifest.py) 扫 dist 出 manifest+签名。
+- **发布说明**：[installer/INCREMENTAL_UPDATE.md](installer/INCREMENTAL_UPDATE.md)。
+
 ## 1.0.7 - 2026-05-25
 
 ### 客户端

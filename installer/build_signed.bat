@@ -50,7 +50,7 @@ if "%VARIANT%"=="" (
   set "MSI_NAME=FMS_UPDATE_MANAGER_beta_Installer.msi"
 )
 
-if "%FMS_APP_VERSION%"=="" set "FMS_APP_VERSION=1.0.7"
+if "%FMS_APP_VERSION%"=="" set "FMS_APP_VERSION=1.0.8"
 
 echo [build] variant=%VARIANT% version=%FMS_APP_VERSION%
 echo [build] spec=%SPEC%
@@ -110,5 +110,67 @@ echo.
 echo [build] DONE
 echo [build]   exe : %DIST_DIR%\%EXE_NAME%
 echo [build]   msi : installer\%MSI_NAME%
+
+REM --- 5) Portable ZIP ------------------------------------------------------
+if "%FMS_SKIP_PORTABLE%"=="1" goto :portable_done
+set "PORTABLE_NAME=%MSI_NAME:.msi=_portable.zip%"
+set "PORTABLE_PATH=installer\%PORTABLE_NAME%"
+echo [build] creating portable zip: %PORTABLE_PATH%
+if exist "%PORTABLE_PATH%" del /q "%PORTABLE_PATH%"
+type nul > "%DIST_DIR%\portable.flag"
+where 7z >nul 2>&1
+if errorlevel 1 (
+  powershell -NoProfile -Command "Compress-Archive -Path '%DIST_DIR%\*' -DestinationPath '%PORTABLE_PATH%' -Force"
+) else (
+  7z a -tzip "%PORTABLE_PATH%" "%DIST_DIR%\*" >nul
+)
+del /q "%DIST_DIR%\portable.flag" 2>nul
+if exist "%PORTABLE_PATH%" (
+  echo [build]   zip : %PORTABLE_PATH%
+) else (
+  echo [build] portable zip creation failed
+)
+:portable_done
+
+REM --- 6) Incremental update artifacts (manifest + release.zip) -------------
+if "%FMS_SKIP_INCREMENTAL%"=="1" goto :incremental_done
+if "%FMS_MANIFEST_PRIVKEY%"=="" (
+  echo [build] FMS_MANIFEST_PRIVKEY not set; skipping manifest generation.
+  echo [build]   set FMS_MANIFEST_PRIVKEY=path\to\manifest_priv.pem to enable.
+  goto :incremental_done
+)
+if not exist "%FMS_MANIFEST_PRIVKEY%" (
+  echo [build] manifest private key not found: %FMS_MANIFEST_PRIVKEY%
+  exit /b 6
+)
+
+set "PY=%FMS_PYTHON%"
+if "%PY%"=="" set "PY=python"
+
+echo [build] generating manifest.json (version %FMS_APP_VERSION%) ...
+"%PY%" tools\build_manifest.py "%DIST_DIR%" "%FMS_APP_VERSION%" --privkey "%FMS_MANIFEST_PRIVKEY%" --out-dir installer
+if errorlevel 1 (
+  echo [build] manifest generation failed
+  exit /b 6
+)
+
+set "RELEASE_ZIP=installer\release.zip"
+echo [build] creating release.zip: %RELEASE_ZIP%
+if exist "%RELEASE_ZIP%" del /q "%RELEASE_ZIP%"
+where 7z >nul 2>&1
+if errorlevel 1 (
+  powershell -NoProfile -Command "Compress-Archive -Path '%DIST_DIR%\*' -DestinationPath '%RELEASE_ZIP%' -Force"
+) else (
+  7z a -tzip "%RELEASE_ZIP%" "%DIST_DIR%\*" -xr!portable.flag >nul
+)
+if not exist "%RELEASE_ZIP%" (
+  echo [build] release.zip creation failed
+  exit /b 6
+)
+echo [build]   manifest : installer\manifest.json
+echo [build]   sig      : installer\manifest.json.sig
+echo [build]   zip      : %RELEASE_ZIP%
+:incremental_done
+
 endlocal
 exit /b 0

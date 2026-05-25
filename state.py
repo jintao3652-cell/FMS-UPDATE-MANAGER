@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,9 +17,29 @@ INSTALLER_COMMANDLINE_HINTS = (
 )
 ROAMING_DIR = Path(os.path.expandvars(r"%APPDATA%")) / APP_NAME
 LOCAL_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%")) / APP_NAME
+
+
+def _exe_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _portable_root() -> Path | None:
+    base = _exe_dir()
+    if (base / "portable.flag").exists():
+        return base / "data"
+    return None
+
+
+PORTABLE_ROOT = _portable_root()
+PORTABLE_MODE = PORTABLE_ROOT is not None
+if PORTABLE_ROOT is not None:
+    ROAMING_DIR = PORTABLE_ROOT / "roaming"
+    LOCAL_DIR = PORTABLE_ROOT / "local"
 STATE_FILE = ROAMING_DIR / "state.json"
 BACKUP_DIR = LOCAL_DIR / "backups"
-APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.7").strip() or "1.0.7"
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.0.8").strip() or "1.0.8"
 MSFS_VERSIONS = ["MSFS 2024", "MSFS 2020"]
 PLATFORMS = ["Xbox/MS Store", "Steam"]
 THEME_LIGHT = "Light Mode"

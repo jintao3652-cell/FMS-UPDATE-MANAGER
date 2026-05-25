@@ -43,7 +43,7 @@ OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
     "ifly-aircraft-737max8": ("ifly", "max8"),
     "inibuilds-aircraft-a340": ("inibuilds",),
     "inibuilds-aircraft-a350": ("inibuilds",),
-    "aerosoft-aircraft-a346-pro": ("toliss", "dfdv2"),
+    "aerosoft-aircraft-a346-pro": ("toliss", "dfdv2", "as346", "a346", "aerosofta346", "aerosoft"),
     "navigraph-msfs2020-base": ("msfs2020",),
     "navigraph-msfs2024-base": ("msfs2024",),
 }
@@ -565,7 +565,14 @@ def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[d
     elif package in {"inibuilds-aircraft-a340", "inibuilds-aircraft-a350"}:
         hard_rules = [("inibuilds",)]
     elif package == "aerosoft-aircraft-a346-pro":
-        hard_rules = [("toliss", "dfdv2"), ("toliss",)]
+        hard_rules = [
+            ("toliss", "dfdv2"),
+            ("toliss",),
+            ("as346",),
+            ("aerosoft", "a346"),
+            ("aerosoft", "a340"),
+            ("a346",),
+        ]
     elif package == "navigraph-msfs2020-base":
         hard_rules = [("msfs2020", "navdata"), ("msfs2020",)]
     elif package == "navigraph-msfs2024-base":

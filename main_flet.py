@@ -243,6 +243,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     state = load_state()
     state.setdefault("crash_upload_enabled", False)
+    locale_first_run = "locale" not in state
     state.setdefault("locale", "zh")
     from i18n import set_locale as _set_locale
     _set_locale(state.get("locale") or "zh")
@@ -358,7 +359,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     }
     colors = get_colors(theme_name)
 
-    page.title = f"FMS UPDATE MANAGER  | 本软件正在测试中，有问题请联系 qq=168329908 | 当前版本 {format_version_display(APP_VERSION)}"
+    from state import PORTABLE_MODE
+    portable_suffix = " | 便携模式 / Portable" if PORTABLE_MODE else ""
+    page.title = f"FMS UPDATE MANAGER  | 本软件正在测试中，有问题请联系 qq=168329908 | 当前版本 {format_version_display(APP_VERSION)}{portable_suffix}"
     page.theme_mode = ft.ThemeMode.DARK if theme_name == THEME_DARK else ft.ThemeMode.LIGHT
     page.bgcolor = colors["root_bg"]
     page.padding = 12
@@ -400,6 +403,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     install_overlay_title_text = _("安装状态")
     install_overlay_title = ft.Text(install_overlay_title_text, size=fs(24), weight=ft.FontWeight.BOLD, color=colors["text_title"])
     install_overlay_container = ft.Container(visible=False)
+    install_progress_bar = ft.ProgressBar(value=0.0, bar_height=6, color="#1a73e8")
+    install_progress_label = ft.Text("", size=fs(12), color=colors["text_sub"])
+    install_progress_row = ft.Container(visible=False, content=ft.Column(spacing=4, controls=[install_progress_label, install_progress_bar]))
+    install_progress_last_update_ts = 0.0
+    _install_progress_re = re.compile(r"^\s*(\d{1,3})%(?:\s+(.*))?$")
     pending_force_install_action: Callable[[], None] | None = None
     pending_force_install_cancel: Callable[[], None] | None = None
     install_force_button: ft.Button | None = None
@@ -440,6 +448,65 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         platform = PLATFORMS[0]
     if theme_name not in (THEME_LIGHT, THEME_DARK):
         theme_name = THEME_LIGHT
+
+    def ensure_initial_locale() -> bool:
+        if not locale_first_run:
+            return True
+
+        from i18n import available_locales as _avail
+        lang_labels = {"zh": "简体中文", "en": "English"}
+        selected = {"code": str(state.get("locale") or "zh")}
+
+        def make_pick(code: str):
+            def _pick(_e) -> None:
+                selected["code"] = code
+                _set_locale(code)
+                state["locale"] = code
+                save_state(state)
+                page.clean()
+                main(page, fast_reload=True, cached_cycle=cached_cycle)
+            return _pick
+
+        buttons: list[ft.Control] = []
+        for code in _avail():
+            label = lang_labels.get(code, code)
+            buttons.append(
+                ft.Button(
+                    label,
+                    on_click=make_pick(code),
+                    width=240,
+                    bgcolor="#1a73e8" if code == selected["code"] else None,
+                    color="#ffffff" if code == selected["code"] else None,
+                )
+            )
+
+        page.clean()
+        page.add(
+            ft.Container(
+                expand=True,
+                alignment=ft.Alignment(0, 0),
+                content=ft.Container(
+                    width=520,
+                    border_radius=18,
+                    bgcolor=colors["panel_bg"],
+                    padding=28,
+                    content=ft.Column(
+                        tight=True,
+                        spacing=18,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Text("选择语言 / Select Language", size=fs(22), weight=ft.FontWeight.BOLD, color=colors["text_title"]),
+                            ft.Text("该选项可稍后在“设置”中修改。\nYou can change this later in Settings.", size=fs(12), color=colors["text_sub"]),
+                            ft.Column(spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER, controls=buttons),
+                        ],
+                    ),
+                ),
+            )
+        )
+        return False
+
+    if not ensure_initial_locale():
+        return
 
     def ensure_required_community_paths() -> bool:
         key20 = community_key("MSFS 2020", platform)
@@ -773,7 +840,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
     def log(msg: str) -> None:
         line = f"[{human_time()}] {msg}"
-        log_list.controls.append(ft.Text(line, size=fs(11), color=colors["log_fg"]))
+        sev = _log_severity(line)
+        pal = LOG_SEVERITY_PALETTE[sev]
+        log_list.controls.append(ft.Text(line, size=fs(11), color=pal["fg"]))
         if len(log_list.controls) > 300:
             log_list.controls = log_list.controls[-300:]
         append_log_file(f"[{human_datetime()}] {msg}")
@@ -1000,6 +1069,26 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         newest = _is_newer_version(latest_tag or latest_name, APP_VERSION)
 
         if newest:
+            from state import PORTABLE_MODE as _PORTABLE
+            has_manifest = False
+            try:
+                for asset in release.get("assets", []) or []:
+                    aname = str(asset.get("name", "")).strip().lower()
+                    if aname == "manifest.json":
+                        has_manifest = True
+                        break
+            except Exception:
+                has_manifest = False
+
+            if _PORTABLE and has_manifest:
+                await _incremental_update_flow(
+                    release=release,
+                    current=current_version_label,
+                    latest=latest_version_label,
+                    release_url=startup_update_release_url,
+                )
+                return
+
             msi_url = ""
             try:
                 for asset in release.get("assets", []) or []:
@@ -1029,6 +1118,112 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         )
         await asyncio.sleep(0.8)
         close_startup_update_overlay()
+
+    async def _incremental_update_flow(release: dict, current: str, latest: str, release_url: str) -> None:
+        from incremental_update import (
+            IncrementalUpdateError,
+            prepare_incremental_update,
+            spawn_updater,
+        )
+        from state import PORTABLE_ROOT
+        expand_window_for_update_notice()
+        install_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else (PORTABLE_ROOT or Path.cwd())
+
+        progress_state = {"phase": "manifest", "done": 0, "total": None}
+
+        def render_progress() -> None:
+            phase = progress_state["phase"]
+            done = progress_state["done"]
+            total = progress_state["total"]
+            if phase == "manifest":
+                line = _("校验更新清单...")
+            elif phase == "download":
+                if total:
+                    pct = int(done * 100 / max(total, 1))
+                    line = _("下载更新包: {pct}% ({done_mb:.1f}/{total_mb:.1f} MB)", pct=pct, done_mb=done / 1048576, total_mb=total / 1048576)
+                else:
+                    line = _("下载更新包: {done_mb:.1f} MB", done_mb=done / 1048576)
+            elif phase == "extract":
+                line = _("应用变更: {done}/{total}", done=done, total=total or "?")
+            else:
+                line = phase
+            set_startup_update_overlay(
+                _("正在增量更新到 {latest}", latest=latest),
+                line,
+                show_skip=False,
+                show_download=False,
+                show_continue=False,
+            )
+
+        def on_progress(phase: str, done: int, total: int | None) -> None:
+            progress_state["phase"] = phase
+            progress_state["done"] = done
+            progress_state["total"] = total
+            try:
+                page.run_task(_progress_render_task)
+            except Exception:
+                pass
+
+        async def _progress_render_task() -> None:
+            render_progress()
+
+        render_progress()
+
+        def _do_prepare() -> tuple[Path, Path]:
+            return prepare_incremental_update(release, install_dir, on_progress=on_progress)
+
+        try:
+            staging, updater_exe = await asyncio.to_thread(_do_prepare)
+        except IncrementalUpdateError as exc:
+            log(_("增量更新失败：{exc}，回退到 MSI 流程", exc=exc))
+            msi_url = ""
+            for asset in release.get("assets", []) or []:
+                name = str(asset.get("name", "")).strip().lower()
+                if name.endswith(".msi"):
+                    msi_url = str(asset.get("browser_download_url", "")).strip()
+                    if msi_url:
+                        break
+            await _force_update_flow(current=current, latest=latest, release_url=release_url, msi_url=msi_url)
+            return
+        except Exception as exc:
+            log(_("增量更新异常：{exc}", exc=exc))
+            set_startup_update_overlay(
+                _("增量更新失败"),
+                _("错误: {exc}\n将回退到完整安装包流程。", exc=exc),
+                show_skip=False,
+                show_download=False,
+                show_continue=False,
+            )
+            await asyncio.sleep(2)
+            msi_url = ""
+            for asset in release.get("assets", []) or []:
+                name = str(asset.get("name", "")).strip().lower()
+                if name.endswith(".msi"):
+                    msi_url = str(asset.get("browser_download_url", "")).strip()
+                    if msi_url:
+                        break
+            await _force_update_flow(current=current, latest=latest, release_url=release_url, msi_url=msi_url)
+            return
+
+        set_startup_update_overlay(
+            _("更新已就绪，正在重启..."),
+            _("应用程序将自动重启完成更新。"),
+            show_skip=False,
+            show_download=False,
+            show_continue=False,
+        )
+        await asyncio.sleep(1)
+        try:
+            spawn_updater(updater_exe, install_dir, staging)
+        except Exception as exc:
+            log(_("启动 updater 失败：{exc}", exc=exc))
+            return
+        # Exit current process so updater can replace files.
+        try:
+            page.window.close()
+        except Exception:
+            pass
+        os._exit(0)
 
     async def _force_update_flow(current: str, latest: str, release_url: str, msi_url: str) -> None:
         expand_window_for_update_notice()
@@ -2077,6 +2272,36 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     zip_update_picker.data = "zip_update_picker"
     page.services.append(zip_update_picker)
 
+    def _log_severity(line: str) -> str:
+        s = line.lower()
+        if any(k in s for k in ("失败", "错误", "error", "failed", "fatal", "exception", "traceback")):
+            return "error"
+        if any(k in s for k in ("警告", "warn", "skipped", "超时", "timeout", "已取消", "取消安装")):
+            return "warn"
+        if any(k in s for k in ("成功", "完成", "已安装", "ok", "success", "已恢复")):
+            return "success"
+        if any(k in s for k in ("解压", "下载", "正在", "开始", "校验", "应用变更", "备份")):
+            return "info"
+        return "default"
+
+    LOG_SEVERITY_PALETTE = {
+        "error":   {"fg": "#ff6b6b", "bg": "#3a1f24"},
+        "warn":    {"fg": "#f5b942", "bg": "#3a2f1a"},
+        "success": {"fg": "#5ad17a", "bg": "#1f3324"},
+        "info":    {"fg": "#7cb7ff", "bg": "#1c2a3d"},
+        "default": {"fg": colors["log_fg"], "bg": colors["panel_soft_bg"]},
+    }
+
+    def _styled_log_row(line: str, *, size: int) -> ft.Container:
+        sev = _log_severity(line)
+        pal = LOG_SEVERITY_PALETTE[sev]
+        return ft.Container(
+            border_radius=10,
+            bgcolor=pal["bg"],
+            padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+            content=ft.Text(line, size=size, color=pal["fg"], selectable=True),
+        )
+
     def refresh_log_overlay() -> None:
         lines = read_log_lines(limit=400)
         log_count = len(lines)
@@ -2084,15 +2309,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             lines = [_("暂无当日日志")]
         today_text = datetime.now().strftime("%Y-%m-%d")
         log_overlay_title.value = _("活动日志（{today_text}）({log_count})", today_text=today_text, log_count=log_count)
-        log_overlay_list.controls = [
-            ft.Container(
-                border_radius=10,
-                bgcolor=colors["panel_soft_bg"],
-                padding=ft.Padding.symmetric(horizontal=12, vertical=8),
-                content=ft.Text(line, size=fs(12), color=colors["log_fg"], selectable=True),
-            )
-            for line in lines
-        ]
+        log_overlay_list.controls = [_styled_log_row(line, size=fs(12)) for line in lines]
 
     def close_log_overlay(_e=None) -> None:
         log_overlay_container.visible = False
@@ -2106,15 +2323,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
     def refresh_install_overlay() -> None:
         lines = install_overlay_lines[-240:] if install_overlay_lines else [_("暂无安装日志")]
         install_overlay_title.value = f"{install_overlay_title_text} ({len(lines)})"
-        install_overlay_list.controls = [
-            ft.Container(
-                border_radius=10,
-                bgcolor=colors["panel_soft_bg"],
-                padding=ft.Padding.symmetric(horizontal=12, vertical=8),
-                content=ft.Text(line, size=fs(12), color=colors["log_fg"], selectable=True),
-            )
-            for line in lines
-        ]
+        install_overlay_list.controls = [_styled_log_row(line, size=fs(12)) for line in lines]
 
     def refresh_install_overlay_if_needed(force: bool = False) -> None:
         nonlocal install_overlay_last_update_ts
@@ -2150,6 +2359,26 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         text = message.strip()
         if not text:
             return
+        nonlocal install_progress_last_update_ts
+        m = _install_progress_re.match(text)
+        if m:
+            try:
+                pct = max(0, min(100, int(m.group(1))))
+            except Exception:
+                pct = None
+            if pct is not None:
+                tail = (m.group(2) or "").strip()
+                install_progress_bar.value = pct / 100.0
+                install_progress_label.value = _("解压进度: {pct}%{extra}", pct=pct, extra=f"  {tail}" if tail else "")
+                install_progress_row.visible = pct < 100
+                if pct >= 100:
+                    install_progress_bar.value = 0.0
+                    install_progress_label.value = ""
+                now_ts = time.monotonic()
+                if install_overlay_container.visible and (pct >= 100 or now_ts - install_progress_last_update_ts >= 0.1):
+                    install_progress_last_update_ts = now_ts
+                    page.update()
+                return
         line = f"[{human_time()}] {text}" if with_timestamp else text
         install_overlay_lines.append(line)
         if len(install_overlay_lines) > 1200:
@@ -2216,6 +2445,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         nonlocal install_overlay_title_text
         if reset:
             install_overlay_lines.clear()
+            install_progress_bar.value = 0.0
+            install_progress_label.value = ""
+            install_progress_row.visible = False
             clear_force_install_prompt(refresh=False)
         install_overlay_title_text = title
         refresh_install_overlay_if_needed(force=True)
@@ -2622,6 +2854,34 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 snack(_("刷新周期失败: {exc}", exc=exc))
             else:
                 log(_("刷新周期失败: {exc}", exc=exc))
+        finally:
+            cid = ""
+            if isinstance(current_cycle_info, dict):
+                cid = str(current_cycle_info.get("cycle_id", "")).strip()
+            if not cid or cid in {"--", "UNKNOWN"}:
+                page.run_task(_auto_retry_refresh_cycle)
+
+    _auto_retry_attempts = {"n": 0}
+    _AUTO_RETRY_MAX = 3
+    _AUTO_RETRY_DELAYS = (3, 8, 20)
+
+    async def _auto_retry_refresh_cycle() -> None:
+        attempt = _auto_retry_attempts["n"]
+        if attempt >= _AUTO_RETRY_MAX:
+            return
+        _auto_retry_attempts["n"] = attempt + 1
+        delay = _AUTO_RETRY_DELAYS[min(attempt, len(_AUTO_RETRY_DELAYS) - 1)]
+        log(_("AIRAC 当前为空，{delay}s 后自动重试（{n}/{max}）", delay=delay, n=attempt + 1, max=_AUTO_RETRY_MAX))
+        try:
+            await asyncio.sleep(delay)
+            await refresh_cycle_async(notify_fail=False)
+            cid = ""
+            if isinstance(current_cycle_info, dict):
+                cid = str(current_cycle_info.get("cycle_id", "")).strip()
+            if cid and cid not in {"--", "UNKNOWN"}:
+                _auto_retry_attempts["n"] = 0
+        except Exception as exc:
+            log(_("AIRAC 自动重试失败：{exc}", exc=exc))
 
     def show_loading_state(message: str) -> None:
         left_list.controls = [ft.Text(message, size=fs(12), color=colors["text_sub"])]
@@ -4953,6 +5213,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         padding=12,
                         content=install_overlay_list,
                     ),
+                    install_progress_row,
                 ],
             ),
         ),
@@ -5044,6 +5305,15 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     log(_("启动更新检查失败：{exc}", exc=exc))
 
                 try:
+                    from incremental_update import write_heartbeat as _wh
+                    from state import PORTABLE_ROOT as _PR
+                    if _PR is not None:
+                        _install_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else _PR
+                        _wh(_install_dir)
+                except Exception as exc:
+                    log(_("写入更新心跳失败：{exc}", exc=exc))
+
+                try:
                     await asyncio.wait_for(refresh_backup_power_login_validity(notify_invalid=False), timeout=15)
                 except TimeoutError:
                     log(_("DATA Token 校验超时，已跳过。"))
@@ -5096,6 +5366,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
 
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "--updater":
+        from incremental_update import run_updater_mode
+        sys.exit(run_updater_mode(sys.argv[1:]))
     if not acquire_singleton_lock():
         try:
             from utils import _show_windows_message_box

@@ -274,9 +274,17 @@ def read_cycle_from_dir(folder: Path | None) -> str:
     return "UNKNOWN"
 
 
-def community_base_candidates(state: dict | None, simulator: str, platform: str) -> list[str]:
+def addon_uses_community_2024(addon) -> bool:
+    pkg = str(getattr(addon, "package_name", "") or "").strip().lower()
+    name = str(getattr(addon, "name", "") or "").strip().lower()
+    if pkg.startswith("css-") or name.startswith("css "):
+        return False
+    return True
+
+
+def community_base_candidates(state: dict | None, simulator: str, platform: str, addon=None) -> list[str]:
     bases = [community_base(state if isinstance(state, dict) else {}, simulator, platform)]
-    if simulator == "MSFS 2024":
+    if simulator == "MSFS 2024" and (addon is None or addon_uses_community_2024(addon)):
         c24 = community_2024_base(state, platform)
         if c24:
             bases.append(c24)
@@ -450,7 +458,7 @@ def read_a346_builtin_cycle(addon: Addon, state: dict | None = None) -> tuple[st
     package_name = infer_package_name(addon)
     candidates: list[Path] = []
     seen: set[str] = set()
-    for base in community_base_candidates(state, addon.simulator, addon.platform):
+    for base in community_base_candidates(state, addon.simulator, addon.platform, addon):
         if not base:
             continue
         package_root = Path(base) / package_name
@@ -487,7 +495,7 @@ def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
     if is_sim_base_navdata_addon(addon):
         if state is None:
             return None
-        for base in community_base_candidates(state, addon.simulator, addon.platform):
+        for base in community_base_candidates(state, addon.simulator, addon.platform, addon):
             p = Path(base)
             if p.exists() and p.is_dir():
                 return p
@@ -502,7 +510,7 @@ def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
             return p
 
     if state is not None and addon_prefers_community(addon):
-        for base in community_base_candidates(state, addon.simulator, addon.platform):
+        for base in community_base_candidates(state, addon.simulator, addon.platform, addon):
             community_path = Path(base) / infer_package_name(addon)
             if addon.navdata_subpath:
                 community_path = community_path / addon.navdata_subpath
@@ -544,7 +552,7 @@ def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
                 return nested if nested is not None else p
 
     if state is not None:
-        for base in community_base_candidates(state, addon.simulator, addon.platform):
+        for base in community_base_candidates(state, addon.simulator, addon.platform, addon):
             community_path = Path(base) / infer_package_name(addon)
             if addon.navdata_subpath:
                 community_path = community_path / addon.navdata_subpath
