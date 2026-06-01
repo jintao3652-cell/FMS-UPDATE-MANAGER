@@ -2209,32 +2209,11 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         append_install_overlay_line(f"{addon.name}: 自动下载失败: {exc}")
                         return False
                     log(f"{addon.name}: OpenList auto download failed, fallback to manual picker ({exc})")
-                    snack(_("自动下载失败，已切换手动选包: {exc}", exc=exc))
-            if bulk_mode:
-                append_install_overlay_line(f"{addon.name}: 跳过（当前模式不允许手动选包）")
-                return False
-            if zip_update_picker is None:
-                snack(_("压缩包选择器未初始化"))
-                return False
-            try:
-                selected_files = await zip_update_picker.pick_files(
-                    dialog_title=f"选择 {addon.name} 导航数据压缩包",
-                    allow_multiple=False,
-                    file_type=ft.FilePickerFileType.CUSTOM,
-                    allowed_extensions=["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz", "tbz2", "xz", "txz", "exe"],
-                )
-                return await on_archive_update_pick_result(
-                    selected_files,
-                    addon,
-                    target,
-                    show_result_dialog=show_result_dialog,
-                    allow_force_prompt=True,
-                    wait_for_completion=wait_for_install,
-                    reset_overlay=True,
-                )
-            except Exception as exc:
-                snack(_("打开压缩包选择窗口失败: {exc}", exc=exc))
-                return False
+                    snack(_("自动下载失败: {exc}", exc=exc))
+                    append_install_overlay_line(f"{addon.name}: 自动下载失败 - {exc}")
+                    return False
+            snack(_("当前未登录或机型不支持自动下载，无法更新。"))
+            return False
         finally:
             set_button_busy(trigger_button, False)
 
@@ -2913,6 +2892,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         provide_progress_callback: bool = False,
         show_page_loading: bool = False,
         show_operation_dialog_ui: bool = True,
+        **kwargs: Any,
     ) -> Any:
         if show_page_loading:
             show_loading_state(message)
@@ -2951,9 +2931,9 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 progress_callback(line)
 
         if provide_progress_callback:
-            task = asyncio.create_task(asyncio.to_thread(func, *args, worker_progress))
+            task = asyncio.create_task(asyncio.to_thread(func, *args, worker_progress, **kwargs))
         else:
-            task = asyncio.create_task(asyncio.to_thread(func, *args))
+            task = asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
         start_ts = asyncio.get_running_loop().time()
         dot_count = 0
         try:
