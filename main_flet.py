@@ -192,7 +192,9 @@ from utils import (
     LOG_DIR,
     append_log_file,
     current_log_file,
+    decrypt_secret,
     detect_airac,
+    encrypt_secret,
     format_version_display,
     fs,
     get_colors,
@@ -3627,6 +3629,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             )
             pass_field = ft.TextField(
                 label=_("密码"),
+                value=decrypt_secret(str(state.get("backup_power_password_enc", ""))),
                 password=True,
                 can_reveal_password=True,
                 expand=True,
@@ -3821,6 +3824,7 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                         )
                         state["backup_power_api_url"] = BACKUP_POWER_LOGIN_URL
                         state["backup_power_username"] = user
+                        state["backup_power_password_enc"] = encrypt_secret(pwd)
                         state["backup_power_token"] = str(result.get("token", "")).strip()
                         state["backup_power_refresh_token"] = str(result.get("refresh_token", "")).strip()
                         state["backup_power_last_login_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -4366,21 +4370,6 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             set_backup_power_login_valid(True)
             return True
         except Exception as exc:
-            saved_refresh = str(state.get("backup_power_refresh_token", "")).strip()
-            api_url = str(state.get("backup_power_api_url", "")).strip()
-            if saved_refresh and api_url:
-                try:
-                    from openlist import backup_power_refresh_request
-                    result = await asyncio.to_thread(backup_power_refresh_request, api_url, saved_refresh)
-                    new_token = str(result.get("token", "")).strip()
-                    if new_token:
-                        state["backup_power_token"] = new_token
-                        save_state(state)
-                        log(_("DATA token 已通过 refresh_token 静默续期"))
-                        set_backup_power_login_valid(True)
-                        return True
-                except Exception as refresh_exc:
-                    log(_("DATA refresh_token 续期失败: {refresh_exc}", refresh_exc=refresh_exc))
             log(_("DATA token 校验失败: {exc}", exc=exc))
             set_backup_power_login_valid(False)
             if notify_invalid:

@@ -22,6 +22,9 @@ REM   build_signed.bat beta      (uses FMS_UPDATE_MANAGER_beta.spec)
 
 setlocal ENABLEDELAYEDEXPANSION
 
+if "%FMS_APP_VERSION%"=="" set "FMS_APP_VERSION=1.0.9"
+
+if "%FMS_SKIP_SIGN_EXE%"=="1" if "%FMS_SKIP_SIGN_MSI%"=="1" goto :skip_pfx_check
 if "%FMS_SIGN_PFX%"=="" (
   echo [build] FMS_SIGN_PFX not set
   exit /b 1
@@ -34,6 +37,7 @@ if not exist "%FMS_SIGN_PFX%" (
   echo [build] cert not found: %FMS_SIGN_PFX%
   exit /b 1
 )
+:skip_pfx_check
 
 set "VARIANT=%~1"
 if "%VARIANT%"=="" (
@@ -41,16 +45,16 @@ if "%VARIANT%"=="" (
   set "WXS=installer\FMS_UPDATE_MANAGER.wxs"
   set "EXE_NAME=FMS_UPDATE_MANAGER.exe"
   set "DIST_DIR=dist\FMS_UPDATE_MANAGER"
-  set "MSI_NAME=FMS_UPDATE_MANAGER_Installer.msi"
+  set "MSI_NAME=FMS Update Manager %FMS_APP_VERSION%.msi"
 ) else (
   set "SPEC=FMS_UPDATE_MANAGER_beta.spec"
   set "WXS=installer\FMS_UPDATE_MANAGER_beta.wxs"
-  set "EXE_NAME=FMS_UPDATE_MANAGER_beta.exe"
-  set "DIST_DIR=dist_beta\FMS_UPDATE_MANAGER_beta"
-  set "MSI_NAME=FMS_UPDATE_MANAGER_beta_Installer.msi"
+  set "EXE_NAME=FMS_UPDATE_MANAGER.exe"
+  set "DIST_DIR=dist\FMS_UPDATE_MANAGER"
+  set "MSI_NAME=FMS Update Manager %FMS_APP_VERSION%.msi"
 )
 
-if "%FMS_APP_VERSION%"=="" set "FMS_APP_VERSION=1.0.8"
+if "%FMS_APP_VERSION%"=="" set "FMS_APP_VERSION=1.0.9"
 
 echo [build] variant=%VARIANT% version=%FMS_APP_VERSION%
 echo [build] spec=%SPEC%
@@ -84,7 +88,7 @@ set "WIX=%FMS_WIX_BIN%"
 if "%WIX%"=="" set "WIX=wix"
 
 echo [build] building MSI from %WXS%
-"%WIX%" build -arch x64 -d "SourceDir=%DIST_DIR%" -d "ProductVersion=%FMS_APP_VERSION%" -o "installer\%MSI_NAME%" "%WXS%"
+"%WIX%" build -arch x64 -ext WixToolset.Util.wixext -ext WixToolset.UI.wixext -d "SourceDir=%CD%\%DIST_DIR%" -d "ProjectDir=%CD%" -d "ProductVersion=%FMS_APP_VERSION%" -d "WixUILicenseRtf=%CD%\installer\license.rtf" -o "installer\%MSI_NAME%" "%WXS%"
 if errorlevel 1 (
   echo [build] WiX build failed.
   exit /b 4
@@ -113,7 +117,7 @@ echo [build]   msi : installer\%MSI_NAME%
 
 REM --- 5) Portable ZIP ------------------------------------------------------
 if "%FMS_SKIP_PORTABLE%"=="1" goto :portable_done
-set "PORTABLE_NAME=%MSI_NAME:.msi=_portable.zip%"
+set "PORTABLE_NAME=FMS Update Manager %FMS_APP_VERSION% ±„–Ø∞Ê.zip"
 set "PORTABLE_PATH=installer\%PORTABLE_NAME%"
 echo [build] creating portable zip: %PORTABLE_PATH%
 if exist "%PORTABLE_PATH%" del /q "%PORTABLE_PATH%"

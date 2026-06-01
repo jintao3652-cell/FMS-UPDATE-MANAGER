@@ -4,7 +4,7 @@ import os
 class Settings:
     db_url: str = os.getenv("APP_DB_URL", "mysql+pymysql://fms_auth:fms_auth@localhost:3306/fms_auth?charset=utf8mb4")
     jwt_secret: str = os.getenv("APP_JWT_SECRET", "change_me")
-    jwt_expire_minutes: int = int(os.getenv("APP_JWT_EXPIRE_MINUTES", "60"))
+    jwt_expire_minutes: int = int(os.getenv("APP_JWT_EXPIRE_MINUTES", "10"))
     refresh_token_expire_days: int = int(os.getenv("APP_REFRESH_TOKEN_EXPIRE_DAYS", "30"))
     admin_username: str = os.getenv("APP_ADMIN_USERNAME", "").strip()
     admin_password: str = os.getenv("APP_ADMIN_PASSWORD", "").strip()

@@ -373,3 +373,64 @@ def acquire_singleton_lock() -> bool:
         pass
     _singleton_handle = fh
     return True
+
+
+def _dpapi_protect(plaintext: bytes) -> bytes:
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    blob_in = DATA_BLOB(len(plaintext), ctypes.cast(ctypes.c_char_p(plaintext), ctypes.POINTER(ctypes.c_char)))
+    blob_out = DATA_BLOB()
+    if not ctypes.windll.crypt32.CryptProtectData(ctypes.byref(blob_in), None, None, None, None, 0x01, ctypes.byref(blob_out)):
+        raise OSError("CryptProtectData failed")
+    try:
+        return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+
+
+def _dpapi_unprotect(ciphertext: bytes) -> bytes:
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    blob_in = DATA_BLOB(len(ciphertext), ctypes.cast(ctypes.c_char_p(ciphertext), ctypes.POINTER(ctypes.c_char)))
+    blob_out = DATA_BLOB()
+    if not ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0x01, ctypes.byref(blob_out)):
+        raise OSError("CryptUnprotectData failed")
+    try:
+        return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+
+
+def encrypt_secret(plaintext: str) -> str:
+    if not plaintext:
+        return ""
+    if os.name != "nt":
+        import base64
+        return "b64:" + base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
+    try:
+        import base64
+        return "dpapi:" + base64.b64encode(_dpapi_protect(plaintext.encode("utf-8"))).decode("ascii")
+    except Exception:
+        return ""
+
+
+def decrypt_secret(token: str) -> str:
+    if not token:
+        return ""
+    import base64
+    try:
+        if token.startswith("dpapi:"):
+            return _dpapi_unprotect(base64.b64decode(token[6:])).decode("utf-8")
+        if token.startswith("b64:"):
+            return base64.b64decode(token[4:]).decode("utf-8")
+    except Exception:
+        return ""
+    return ""

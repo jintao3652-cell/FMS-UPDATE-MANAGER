@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.9 - 2026-05-27
+
+### 客户端
+
+- **登录密码本地缓存**：DATA 登录账号密码使用 Windows DPAPI（CurrentUser 范围）加密保存到 `state.json` 的 `backup_power_password_enc` 字段，下次打开登录对话框自动回填。换 Windows 用户或换机器都解不开（[utils.py](utils.py) `encrypt_secret`/`decrypt_secret`，[main_flet.py:3632](main_flet.py#L3632)、[main_flet.py:3827](main_flet.py#L3827)）。非 Windows 平台回退到 base64（无加密保护）。
+- **移除 access token 自动续期**：原本 token 过期后会用 refresh_token 静默续期；现在 token 失效直接弹"请重新登录"，配合服务端 token TTL 缩短为 10 分钟，登录态边界更明确（[main_flet.py:4368](main_flet.py#L4368)）。
+- **隐藏 cmd 控制台窗口**：[FMS_UPDATE_MANAGER_beta.spec](FMS_UPDATE_MANAGER_beta.spec) 切换为 `console=False`，启动时不再附带黑色命令行窗口。崩溃信息仍由 [crash_report.py](crash_report.py) 写入文件日志。
+
+### 服务器
+
+- **`APP_JWT_EXPIRE_MINUTES` 默认值 60 → 10**（仅 `auth_api`，admin_panel 后台保持 120）。需要重启 `auth_api` 容器生效。已经在 `.env` 显式设置过该变量的部署不受影响。
+
+### 安装包 / 便携版
+
+- **去除 Beta 字样**：产品名、开始菜单文件夹、注册表键、安装目录默认值统一为 `FMS Update Manager`。文件名规范：MSI = `FMS Update Manager <版本>.msi`，便携版 = `FMS Update Manager <版本> 便携版.zip`。
+- **安装目录可选 + 记忆历史路径**：MSI 切换为 `WixUI_InstallDir` 对话框集，安装时显示"目标文件夹"页面，用户可改路径。安装目录写入 `HKLM\Software\CNRPG\FMS Update Manager\InstallFolder`，下次升级时优先读取该值作为默认路径。
+- **桌面快捷方式可选**：保留为可勾选的 Feature。
+- **「所有应用」开始菜单**：[installer/FMS_UPDATE_MANAGER_beta.wxs](installer/FMS_UPDATE_MANAGER_beta.wxs) 注册到 `ProgramMenuFolder\FMS Update Manager`，Windows 开始菜单 → 所有应用列表中可见。
+- **不再签名**：本版本不进行 Authenticode 签名，SmartScreen 会拦截首次安装（点"仍要运行"绕过）。
+
+### 构建
+
+- **PyInstaller 切换为目录模式**：[FMS_UPDATE_MANAGER_beta.spec](FMS_UPDATE_MANAGER_beta.spec) 加入 COLLECT，产物从单 exe 变为 `dist\FMS_UPDATE_MANAGER\` 目录树，便携 zip 与增量更新（manifest diff）才能正常工作。
+- [installer/build_signed.bat](installer/build_signed.bat) 修复多项：
+  - `FMS_SKIP_SIGN_EXE=1` + `FMS_SKIP_SIGN_MSI=1` 时跳过 PFX 检查（无证书也能构建）
+  - WiX 命令补 `-ext WixToolset.Util.wixext -ext WixToolset.UI.wixext` 加载 util/ui 扩展
+  - 路径基准修复：`SourceDir` 与 `ProjectDir` 改用绝对路径变量，避免 WiX 把 `..\` 解析为相对于 wxs 文件位置
+  - `FMS_APP_VERSION` 默认值 1.0.8 → 1.0.9
+- 新增 [installer/license.rtf](installer/license.rtf)（`WixUI_InstallDir` 强制要求 license 页面）。
+
 ## 1.0.8 - 2026-05-25
 
 ### 客户端
