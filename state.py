@@ -39,7 +39,7 @@ if PORTABLE_ROOT is not None:
     LOCAL_DIR = PORTABLE_ROOT / "local"
 STATE_FILE = ROAMING_DIR / "state.json"
 BACKUP_DIR = LOCAL_DIR / "backups"
-APP_VERSION = os.getenv("FMS_APP_VERSION", "1.1.0").strip() or "1.1.0"
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.1.2").strip() or "1.1.0"
 MSFS_VERSIONS = ["MSFS 2024", "MSFS 2020"]
 PLATFORMS = ["Xbox/MS Store", "Steam"]
 THEME_LIGHT = "Light Mode"
@@ -84,6 +84,9 @@ class Addon:
     target_path: str = ""
     package_name: str = ""
     navdata_subpath: str = ""
+    # "" = navdata/aircraft (default flow); "community_plugin" = whole-folder
+    # Navigraph package installed fresh into Community (no cycle.json).
+    install_mode: str = ""
 
 
 def community_key(simulator: str, platform: str) -> str:
@@ -262,6 +265,20 @@ def default_addons() -> list[dict]:
                     "navdata_subpath": "",
                 }
             )
+
+    # Augment the hand-tuned families above with any packages from the bundled
+    # Navigraph catalog that aren't already covered. This is data-driven: adding
+    # a package to navigraph_catalog_2605.json surfaces it here automatically,
+    # without new hardcoded matching rules (the generic token matcher handles it).
+    try:
+        import navigraph_catalog
+
+        catalog_packages = navigraph_catalog.load_bundled_catalog()
+        addons.extend(navigraph_catalog.missing_addons_from_catalog(catalog_packages, addons))
+    except Exception:
+        # Catalog augmentation is best-effort; never break the core addon list.
+        pass
+
     return addons
 
 
@@ -281,6 +298,7 @@ def to_addon(item: dict) -> Addon | None:
             target_path=str(item.get("target_path", "")).strip(),
             package_name=package_name,
             navdata_subpath=navdata_subpath,
+            install_mode=str(item.get("install_mode", "")).strip(),
         )
     except Exception:
         return None
@@ -436,6 +454,7 @@ def _addon_from_dict(item: dict) -> Addon:
         target_path=str(item.get("target_path", "")).strip(),
         package_name=package_name,
         navdata_subpath=navdata_subpath,
+        install_mode=str(item.get("install_mode", "")).strip(),
     )
 
 

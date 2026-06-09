@@ -37,3 +37,6 @@ installer/manifest.json.sig
 set
 TES.PY
 __push_tmp_repo/
+
+# Local build output (CI produces the official MSI/ZIP artifacts)
+installer_out/

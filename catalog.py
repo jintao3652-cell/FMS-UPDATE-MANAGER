@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from pathlib import Path
@@ -491,6 +492,73 @@ def read_a346_builtin_cycle(addon: Addon, state: dict | None = None) -> tuple[st
     return None
 
 
+def is_external_folder_addon(addon: Addon) -> bool:
+    """True for catalog packages that install into a fixed external folder.
+
+    These come from Navigraph ``external`` strategy packages (FSiPanel, HiFi,
+    TFM, TDS GTNXi, ...). Their target lives outside Community and is carried
+    verbatim in ``addon.target_path`` (an expandvars path), so it is resolved
+    directly rather than via folder-signature scanning.
+    """
+    tp = str(getattr(addon, "target_path", "") or "").strip()
+    if not tp:
+        return False
+    # Fenix / FSLabs have their own dedicated resolvers; don't double-handle.
+    if is_fenix_addon(addon) or is_fslabs_addon(addon):
+        return False
+    return ("%" in tp) or os.path.isabs(_expand(tp))
+
+
+def resolve_external_folder_target(addon: Addon) -> Path | None:
+    p = Path(_expand(addon.target_path))
+    return p if p.exists() and p.is_dir() else None
+
+
+def is_community_plugin_addon(addon: Addon) -> bool:
+    """True for whole-folder Navigraph packages installed fresh into Community.
+
+    These (Academy, Charts, SimBrief, Avionics plugins) carry no cycle.json and
+    are dropped into ``Community/<package_name>`` as a single folder.
+    """
+    return str(getattr(addon, "install_mode", "") or "").strip() == "community_plugin"
+
+
+def community_plugin_install_target(addon: Addon, state: dict | None = None) -> Path | None:
+    """Where a community-plugin addon should be installed (even if not present yet).
+
+    Returns ``Community/<package_name>`` for the addon's simulator/platform.
+    Prefers an existing folder; otherwise returns the path under the first
+    available Community base so a fresh install can create it.
+    """
+    pkg = infer_package_name(addon)
+    if not pkg:
+        return None
+    bases = community_base_candidates(state, addon.simulator, addon.platform, addon)
+    if not bases:
+        return None
+    for base in bases:
+        candidate = Path(base) / pkg
+        if candidate.exists():
+            return candidate
+    return Path(bases[0]) / pkg
+
+
+def read_plugin_version_from_dir(folder: Path | None) -> str:
+    """Read ``package_version`` from an installed plugin folder's manifest.json."""
+    if folder is None:
+        return ""
+    try:
+        manifest = folder / "manifest.json"
+        if not manifest.exists():
+            return ""
+        payload = json.loads(manifest.read_text(encoding="utf-8", errors="ignore"))
+        if isinstance(payload, dict):
+            return str(payload.get("package_version", "")).strip()
+    except Exception:
+        return ""
+    return ""
+
+
 def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
     if is_sim_base_navdata_addon(addon):
         if state is None:
@@ -508,6 +576,18 @@ def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
         p = Path(fslabs_navdata_path())
         if p.exists():
             return p
+
+    if is_external_folder_addon(addon):
+        return resolve_external_folder_target(addon)
+
+    if is_community_plugin_addon(addon):
+        # Whole-folder Community plugin: target is Community/<package_name>.
+        # Return it only if already installed; a fresh install resolves the
+        # destination via community_plugin_install_target instead.
+        target = community_plugin_install_target(addon, state)
+        if target is not None and target.exists() and target.is_dir():
+            return target
+        return None
 
     if state is not None and addon_prefers_community(addon):
         for base in community_base_candidates(state, addon.simulator, addon.platform, addon):
@@ -570,6 +650,14 @@ def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
 
 
 def addon_status(addon: Addon, api_cycle: str, state: dict | None = None) -> tuple[str, str, str, str]:
+    if is_community_plugin_addon(addon):
+        # Whole-folder plugin: no AIRAC. Installed => UP TO DATE, else NOT
+        # INSTALLED. Report the package_version (if any) in the installed slot.
+        target = community_plugin_install_target(addon, state)
+        if target is not None and target.exists() and target.is_dir():
+            version = read_plugin_version_from_dir(target) or "INSTALLED"
+            return "UP TO DATE", version, api_cycle, str(target)
+        return "NOT INSTALLED", "NONE", api_cycle, str(target) if target is not None else ""
     if is_sim_base_navdata_addon(addon):
         target = resolve_target_dir(addon, state)
         if target and target.exists():
@@ -578,6 +666,22 @@ def addon_status(addon: Addon, api_cycle: str, state: dict | None = None) -> tup
                 return "UP TO DATE", "INSTALLED", api_cycle, str(target)
             return "NOT INSTALLED", "NONE", api_cycle, str(target)
         return "NOT INSTALLED", "NONE", api_cycle, ""
+    if is_external_folder_addon(addon):
+        # Third-party host folders (FSiPanel, HiFi Active Sky, TFM, TDS GTNXi):
+        # we can only update data into an EXISTING external folder — we never
+        # create it. If the folder is absent the host app isn't installed, so
+        # report NOT INSTALLED (red) rather than offering a phantom target.
+        target = resolve_external_folder_target(addon)
+        if target is None:
+            return "NOT INSTALLED", "NONE", api_cycle, ""
+        installed = read_cycle_from_dir(target)
+        if api_cycle in ("NONE", "UNKNOWN"):
+            status = "API UNAVAILABLE"
+        elif installed == api_cycle:
+            status = "UP TO DATE"
+        else:
+            status = "UPDATE READY"
+        return status, installed, api_cycle, str(target)
     target = resolve_target_dir(addon, state)
     if target and target.exists():
         installed = read_cycle_from_dir(target)

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.2 - 2026-06-15
+
+### 客户端
+
+- **Navigraph 官方插件包支持一键安装到 Community**：Academy 2020/2024、Charts In-Game Panel、EFB Charts App、SimBrief EFB App、SimBrief Dispatch、Avionics G1000 / G3000-G5000 / G3X 共 9 个整目录插件包，未安装时登录后可直接安装到用户设置的 Community 路径下的 `<package_name>` 目录（不再要求目标目录预先存在）。这类包无 AIRAC，状态按"已装即最新"处理：已安装显示 UP TO DATE 并读取 `manifest.json` 的 `package_version`，未安装显示 NOT INSTALLED（[catalog.py:652](catalog.py#L652)、[main_flet.py:2228](main_flet.py#L2228)）。
+- **插件安装流程跳过 cycle.json 校验**：插件包不含 cycle.json，安装时解压后定位顶层包目录、备份旧目录、整体复制进 `Community/<package_name>`（[main_flet.py](main_flet.py) `perform_archive_update_install` 插件分支、`_locate_plugin_payload_dir`）。
+- **install_mode 字段迁移回填**：旧版 `state.json` 中已存在的插件条目缺少 `install_mode` 字段，会被误判为普通机型并解析到 WASM 路径。启动时用 catalog 的值回填已存在条目并存盘，插件改为正确解析到 Community 路径（[main_flet.py:336](main_flet.py#L336)）。
+- **外部宿主类包目录不存在时显示"未安装"**：FSiPanel、HiFi Active Sky FS、Talking Flight Monitor、TDS GTNXi 等 external 包只能更新进**已存在**的第三方软件目录、从不创建。修复此前目录不存在仍把配置路径当作目标、误判为非"未安装"的问题；现在目录缺失一律显示红色 NOT INSTALLED，安装流程也会拦截并提示先安装对应软件，不再推断 WASM 或弹手动选路径（[catalog.py:669](catalog.py#L669)、[main_flet.py:2234](main_flet.py#L2234)）。
+
+### 构建 / 目录
+
+- **从 Navigraph catalog 自动补全下载命名 hints**：`openlist.py` 导入时合并 `navigraph_catalog.openlist_hint_map(...)` 自动派生的下载命名提示，仅填补未手工调优的包，手工 hints 优先（[openlist.py:52](openlist.py#L52)）。
+- **`Addon` 新增 `install_mode` 字段**：用于区分整目录插件（`community_plugin`）与普通导航数据机型，在 state 序列化/反序列化中透传（[state.py](state.py)）。
+- **`archive.py` 新增 `read_package_version_from_manifest`**：从 MSFS 包的 `manifest.json` 读取 `package_version`，供插件状态显示（[archive.py:213](archive.py#L213)）。
+
+### 测试
+
+- 新增 [tests/test_navigraph_catalog.py](tests/test_navigraph_catalog.py)：覆盖插件识别/排除、addon 标记、按 sim×platform 的 Community 目标解析、未装→已装状态、external 宿主目录存在/缺失的状态判定。全套 22 个用例通过。
+
 ## 1.1.0 - 2026-05-27
 
 ### 客户端

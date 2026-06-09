@@ -49,6 +49,26 @@ OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _augment_archive_hints_from_catalog() -> None:
+    """Add auto-derived download hints for catalog packages not already tuned.
+
+    Hand-tuned entries above take precedence; this only fills in packages that
+    have no explicit hint (e.g. the ones surfaced from navigraph_catalog_2605.json).
+    Best-effort: never break import if the catalog module/file is unavailable.
+    """
+    try:
+        import navigraph_catalog
+
+        derived = navigraph_catalog.openlist_hint_map(navigraph_catalog.load_bundled_catalog())
+    except Exception:
+        return
+    for package_name, hints in derived.items():
+        OPENLIST_ARCHIVE_NAME_HINTS.setdefault(package_name, hints)
+
+
+_augment_archive_hints_from_catalog()
+
+
 def normalize_backup_power_login_url(raw_url: str) -> str:
     text = str(raw_url or "").strip()
     if not text:

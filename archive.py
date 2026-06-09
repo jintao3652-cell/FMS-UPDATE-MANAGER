@@ -209,6 +209,36 @@ def read_cycle_json(json_path: Path) -> str:
     return read_cycle_from_payload(payload)
 
 
+def read_package_version_from_manifest(source: Path) -> str:
+    """Read ``package_version`` from an MSFS package's manifest.json.
+
+    Accepts either a directory containing ``<root>/manifest.json`` (or a nested
+    single-folder layout) or a manifest.json file directly. Returns "" if not
+    found. Used for whole-folder Navigraph plugins, which version by package
+    version rather than AIRAC cycle.
+    """
+    try:
+        manifest_path: Path | None = None
+        if source.is_file() and source.name.lower() == "manifest.json":
+            manifest_path = source
+        elif source.is_dir():
+            direct = source / "manifest.json"
+            if direct.exists():
+                manifest_path = direct
+            else:
+                for candidate in sorted(source.glob("*/manifest.json")):
+                    manifest_path = candidate
+                    break
+        if manifest_path is None or not manifest_path.exists():
+            return ""
+        payload = json.loads(manifest_path.read_text(encoding="utf-8", errors="ignore"))
+        if isinstance(payload, dict):
+            return str(payload.get("package_version", "")).strip()
+    except Exception:
+        return ""
+    return ""
+
+
 def inspect_sim_base_payload(extracted_root: Path, required_subfolders: tuple[str, ...]) -> dict | None:
     """Locate a directory inside extracted_root that contains ALL required top-level subfolders.
 

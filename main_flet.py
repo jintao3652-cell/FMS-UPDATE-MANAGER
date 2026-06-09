@@ -181,6 +181,9 @@ from catalog import (
     resolve_target_dir as catalog_resolve_target_dir,
     resolve_wasm_target_by_folder_name,
     resolve_wasm_target_by_folder_name as catalog_resolve_wasm_target_by_folder_name,
+    is_community_plugin_addon,
+    community_plugin_install_target,
+    is_external_folder_addon,
     status_badge_style,
     status_dot_color,
     CYCLE_JSON_SCAN_CACHE,
@@ -232,6 +235,42 @@ ft.context.disable_auto_update()
 TASKBAR_ICON_FILE = Path(__file__).resolve().parent / "assets" / "travel_airplane.ico"
 APP_WINDOW_LOGO_FILE = Path(__file__).resolve().parent / "assets" / "logo_telegram.ico"
 EXTRACTED_DIR = LOCAL_DIR / "extracted"
+
+
+def _locate_plugin_payload_dir(extracted_root: Path, pkg_name: str) -> Path | None:
+    """Find the MSFS package folder to install from an extracted plugin archive.
+
+    Prefers a directory named ``pkg_name`` (the rootFolderName); otherwise a
+    directory containing manifest.json. Searches the extraction root and one
+    nested level (archives often wrap everything in a single top folder).
+    """
+    if extracted_root is None or not extracted_root.exists():
+        return None
+    target_name = pkg_name.strip().lower()
+
+    def _scan(base: Path) -> Path | None:
+        try:
+            entries = [e for e in base.iterdir() if e.is_dir()]
+        except OSError:
+            return None
+        for entry in entries:
+            if entry.name.lower() == target_name:
+                return entry
+        for entry in entries:
+            if (entry / "manifest.json").exists():
+                return entry
+        return None
+
+    found = _scan(extracted_root)
+    if found is not None:
+        return found
+    try:
+        subdirs = [e for e in extracted_root.iterdir() if e.is_dir()]
+    except OSError:
+        subdirs = []
+    if len(subdirs) == 1:
+        return _scan(subdirs[0])
+    return None
 
 
 def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-member
@@ -295,6 +334,18 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         "pmdg 777-200er": "pmdg-aircraft-77er",
         "pmdg 777-200lr": "pmdg-aircraft-77l",
     }
+    # install_mode was added after some states were saved; backfill it onto
+    # pre-existing addon dicts from the catalog so whole-folder Navigraph
+    # plugins resolve to Community instead of falling through to WASM.
+    expected_install_modes = {
+        (
+            str(d.get("name", "")).strip(),
+            str(d.get("simulator", "")).strip(),
+            str(d.get("platform", "")).strip(),
+        ): str(d.get("install_mode", "")).strip()
+        for d in default_addons()
+        if isinstance(d, dict)
+    }
     for item in addon_items:
         if not isinstance(item, dict):
             continue
@@ -302,6 +353,16 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         name = str(item.get("name", "")).strip().lower()
         package = str(item.get("package_name", "")).strip().lower()
         target = str(item.get("target_path", "")).strip().lower().replace("\\", "/")
+        catalog_mode = expected_install_modes.get(
+            (
+                str(item.get("name", "")).strip(),
+                str(item.get("simulator", "")).strip(),
+                str(item.get("platform", "")).strip(),
+            )
+        )
+        if catalog_mode and str(item.get("install_mode", "")).strip() != catalog_mode:
+            item["install_mode"] = catalog_mode
+            migrated = True
         expected_package = expected_packages.get(name)
         if (
             str(item.get("simulator", "")).strip() == "MSFS 2024"
@@ -1647,6 +1708,56 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         if progress_callback is not None:
             progress_callback(f"开始安装: {addon.name}")
         extracted_root: Path | None = None
+        if is_community_plugin_addon(addon):
+            try:
+                pkg_name = infer_package_name(addon)
+                if not pkg_name:
+                    raise ValueError(_("插件包名为空，无法安装"))
+                if progress_callback is not None:
+                    progress_callback(_("正在解压压缩包..."))
+                extracted_root = extract_archive_to_temp(archive_path, progress_callback=progress_callback)
+                if progress_callback is not None:
+                    progress_callback(_("正在定位插件载荷..."))
+                payload_dir = _locate_plugin_payload_dir(extracted_root, pkg_name)
+                if payload_dir is None:
+                    raise ValueError(_("压缩包中未找到插件目录: {pkg}", pkg=pkg_name))
+
+                # target is Community/<pkg_name>; install_base is its parent (Community).
+                install_base = target.parent if target.name.lower() == pkg_name.lower() else target
+                if not install_base.exists() or not install_base.is_dir():
+                    raise ValueError(_("Community 目录不可用: {install_base}", install_base=install_base))
+                dest = install_base / pkg_name
+
+                backup_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                safe_name = addon.name.replace("/", "_").replace("\\", "_")
+                backup_path: Path | None = None
+                if dest.exists():
+                    if progress_callback is not None:
+                        progress_callback(_("备份现有插件..."))
+                    addon_backup_root = BACKUP_DIR / safe_name
+                    addon_backup_root.mkdir(parents=True, exist_ok=True)
+                    backup_path = addon_backup_root / backup_stamp
+                    shutil.copytree(dest, backup_path, dirs_exist_ok=True)
+                    shutil.rmtree(dest, ignore_errors=True)
+                if progress_callback is not None:
+                    progress_callback(_("安装插件: {pkg}", pkg=pkg_name))
+                shutil.copytree(payload_dir, dest)
+                copied_files = sum(1 for _f in dest.rglob("*") if _f.is_file())
+                if progress_callback is not None:
+                    progress_callback(f"安装完成: {addon.name}")
+                return {
+                    "backup_path": str(backup_path) if backup_path else "",
+                    "airac": "UNKNOWN",
+                    "install_base": str(install_base),
+                    "install_root": str(dest),
+                    "extracted_files": copied_files,
+                    "archive_name": archive_name,
+                    "extracted_root": str(extracted_root) if extracted_root else "",
+                }
+            except Exception:
+                if extracted_root is not None:
+                    cleanup_temp_dir(extracted_root)
+                raise
         if is_sim_base_navdata_addon(addon):
             try:
                 required = sim_base_navdata_required_subfolders(addon)
@@ -1862,6 +1973,8 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                     "navigraph-msfs2020-base",
                     "navigraph-msfs2024-base",
                 }
+                if is_community_plugin_addon(addon):
+                    is_base_navdata = True  # reuse the "安装完成" (no-AIRAC) messaging
                 if is_base_navdata:
                     archive_cycle_msg = _("安装完成")
                 append_install_overlay_line(archive_cycle_msg)
@@ -1951,6 +2064,21 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
             append_install_overlay_line(_("目标目录: {target}", target=target))
 
         try:
+            if is_community_plugin_addon(addon):
+                append_install_overlay_line(_("Navigraph 插件包，跳过 cycle.json 校验"))
+                await rebuild_lists_async(show_loading=False)
+                ok_task = start_archive_update(
+                    addon,
+                    target,
+                    archive_path,
+                    archive_path.name,
+                    "UNKNOWN",
+                    show_result_dialog=show_result_dialog,
+                    run_in_background=False,
+                )
+                if ok_task is not None:
+                    return await ok_task
+                return False
             if is_sim_base_navdata_addon(addon):
                 append_install_overlay_line(_("机型为 MSFS 导航数据库，跳过 cycle.json 校验"))
                 archive_airac = detect_airac(archive_path.name) or "UNKNOWN"
@@ -2098,6 +2226,27 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
                 return False
             target = resolve_target_dir(addon, state)
             inferred_from_wasm = False
+            if target is None and is_community_plugin_addon(addon):
+                # Whole-folder Navigraph plugin not yet installed: install fresh
+                # into Community/<package_name>. The folder is created on install.
+                target = community_plugin_install_target(addon, state)
+                if target is not None:
+                    log(f"{addon.name}: community plugin fresh install target {target}")
+            if target is None and is_external_folder_addon(addon):
+                # External host folder (FSiPanel, HiFi Active Sky, TFM, TDS GTNXi):
+                # we update INTO an existing folder, never create one. If it's
+                # missing the host app isn't installed — stop, don't infer WASM
+                # or prompt for a path.
+                message = _(
+                    "未检测到 {name} 的安装目录，请先安装对应软件后再更新导航数据。",
+                    name=addon.name,
+                )
+                log(f"{addon.name}: external host folder not found, skipping install")
+                if bulk_mode:
+                    append_install_overlay_line(f"{addon.name}: {message}")
+                else:
+                    snack(message)
+                return False
             if target is None:
                 target = resolve_wasm_target_by_folder_name(addon, state)
                 inferred_from_wasm = target is not None
