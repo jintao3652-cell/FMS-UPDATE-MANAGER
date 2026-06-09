@@ -1,0 +1,93 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="FMS Update Manager"
+           Manufacturer="CNRPG"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="3EFC6484-8AD8-4D4E-BFAA-4ED17A58B5A6"
+           Language="1033">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="AppIcon" SourceFile="$(var.ProjectDir)\assets\travel_airplane.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="InstallFolderSearch"
+                      Root="HKLM"
+                      Key="Software\CNRPG\FMS Update Manager"
+                      Name="InstallFolder"
+                      Type="raw" />
+    </Property>
+
+    <util:CloseApplication Id="RequireAppClosed" Target="FMS_UPDATE_MANAGER.exe"
+                           Description="Detected FMS Update Manager is running. Please close it before continuing installation."
+                           PromptToContinue="yes" CloseMessage="yes" RebootPrompt="no" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="FMS Update Manager" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="FMS Update Manager" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="StartMenuShortcutComponents" />
+      <ComponentGroupRef Id="InstallFolderRegistry" />
+      <Feature Id="DesktopShortcutFeature" Title="Desktop Shortcut"
+               Description="Create desktop shortcut icon" Level="1" Display="expand">
+        <ComponentGroupRef Id="DesktopShortcutComponents" />
+      </Feature>
+    </Feature>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectDir)\installer\license.rtf" />
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="FMS Update Manager" />
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="StartMenuShortcutComponents">
+      <Component Id="StartMenuShortcutComponent" Directory="ProgramMenuDir"
+                 Guid="F58CF217-63CF-4347-AD0A-8D4BA9A49B05">
+        <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuDir"
+                  Name="FMS Update Manager" Description="FMS Update Manager"
+                  Icon="AppIcon" WorkingDirectory="INSTALLFOLDER"
+                  Target="[INSTALLFOLDER]FMS_UPDATE_MANAGER.exe" />
+        <RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="Software\CNRPG\FMS Update Manager"
+                       Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="DesktopShortcutComponents">
+      <Component Id="DesktopShortcutComponent" Directory="DesktopFolder"
+                 Guid="6CF2E632-7FD2-4ABE-9850-9DA6EE2C107B">
+        <Shortcut Id="DesktopShortcut" Directory="DesktopFolder"
+                  Name="FMS Update Manager" Description="FMS Update Manager"
+                  Icon="AppIcon" WorkingDirectory="INSTALLFOLDER"
+                  Target="[INSTALLFOLDER]FMS_UPDATE_MANAGER.exe" />
+        <RegistryValue Root="HKLM" Key="Software\CNRPG\FMS Update Manager"
+                       Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="InstallFolderRegistry" Directory="INSTALLFOLDER">
+      <Component Id="InstallFolderRegistryComponent" Guid="A1F9D2C4-1B5E-4F3A-9E6F-2C7A8B0D3E11">
+        <RegistryValue Root="HKLM" Key="Software\CNRPG\FMS Update Manager"
+                       Name="InstallFolder" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.SourceDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

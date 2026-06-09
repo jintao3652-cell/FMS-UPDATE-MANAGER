@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile backup_auth/app/main.py backup_auth/app/config.py admin_panel/app/main.py admin_panel/app/mailer.py admin_panel/app/schemas.py admin_panel/app/ui.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backup_auth/app/main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('auth_api OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('admin_panel/app/ui.py',encoding='utf-8'\\).read\\(\\)\\); print\\('ui.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('register_ui/app/main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('register_ui OK'\\)\")",
+      "Bash(python -)",
+      "Bash(robocopy . __push_tmp_repo /MIR /XD .git __push_tmp_repo __pycache__ .venv .idea .vscode .claude build dist build_signed memory /XF *.pyc *.pyo *.bak *.tmp *.swp /NFL /NDL /NJH /NJS /R:1 /W:1)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(python _i18n_migrate.py)",
+      "Bash(python)"
+    ]
+  }
+}

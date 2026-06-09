@@ -1,0 +1,39 @@
+# Secrets / keys  (NEVER commit these)
+tools/keys/
+*.env
+.env
+deploy/.env
+*.pem
+*.key
+*.pfx
+*secret*
+*credential*
+navigraph_token.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Build output
+build/
+dist/
+
+# Packaged artifacts (built by CI; never commit)
+installer/*.msi
+installer/*.wixpdb
+installer/*.zip
+installer/manifest.json
+installer/manifest.json.sig
+*.wixobj
+
+# IDE / editor
+.idea/
+.vscode/
+
+# Misc local scratch files
+set
+TES.PY
+__push_tmp_repo/

@@ -1,0 +1,189 @@
+name: Build MSI and ZIP
+
+# 触发条件：
+#   - push 到 main 分支（除非只改了文档/工作流本身）
+#   - 手动在 Actions 页面点击运行（workflow_dispatch）
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'deploy/**'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: '应用版本号（留空则使用 state.py 中的 APP_VERSION）'
+        required: false
+        default: ''
+
+# 让产物能写入 Release（push tag 时用得到，这里保留权限以便后续扩展）
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on Windows
+    runs-on: windows-latest
+
+    steps:
+      # 1) 拉取源码
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2) 安装 Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      # 3) 安装依赖 + PyInstaller
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # 4) 解析版本号：
+      #    - 手动触发且填了 app_version -> 直接用它
+      #    - 否则以 state.py 的 APP_VERSION 为「起始基准」，每次推送自动 +1，
+      #      且每一段都限制为个位数(0-9)，满9进位：
+      #        1.1.0 -> 1.1.1 -> ... -> 1.1.9 -> 1.2.0 -> ... -> 1.9.9 -> 2.0.0
+      #      偏移量 = run_number - 1（首次构建即基准本身）。最大 9.9.9，超出则报错。
+      - name: Resolve app version
+        id: ver
+        shell: bash
+        env:
+          INPUT_VER: ${{ github.event.inputs.app_version }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          VER=$(python - <<'PY'
+          import re, io, os, sys
+          inp = (os.environ.get("INPUT_VER") or "").strip()
+          if inp:
+              print(inp)
+              sys.exit(0)
+          s = io.open("state.py", encoding="utf-8").read()
+          m = re.search(r'APP_VERSION\s*=\s*os\.getenv\([^,]+,\s*["\']([0-9][^"\']*)["\']', s)
+          base = m.group(1) if m else "1.1.0"
+          parts = (base.split(".") + ["0", "0", "0"])[:3]
+          try:
+              a, b, c = (int(p) for p in parts)
+          except ValueError:
+              a, b, c = 1, 1, 0
+          # 把基准当成「满10进位的三位计数」的数值（每段0-9）
+          base_n = a * 100 + b * 10 + c
+          offset = int(os.environ.get("RUN_NUMBER", "1")) - 1
+          n = base_n + offset
+          if n > 999:
+              print("::error::版本号已超过上限 9.9.9（基准 %s + 偏移 %d）。"
+                    "请在 state.py 中下调或重置 APP_VERSION。" % (base, offset),
+                    file=sys.stderr)
+              sys.exit(1)
+          print("%d.%d.%d" % (n // 100 % 10, n // 10 % 10, n % 10))
+          PY
+          )
+          if [ -z "$VER" ]; then echo "::error::版本号解析失败"; exit 1; fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "本次构建版本号: $VER"
+
+      # 4.5) 把递增后的版本号固化进 state.py 的 APP_VERSION 默认值。
+      #      打包后的 exe 运行时没有 FMS_APP_VERSION 环境变量，会回退到默认值，
+      #      因此必须在打包前替换默认值，程序内显示的版本号才会跟着递增。
+      #      只改 CI 临时检出，不影响仓库源码。
+      - name: Stamp version into state.py
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          python - "$VER" <<'PY'
+          import re, io, sys
+          ver = sys.argv[1]
+          path = "state.py"
+          s = io.open(path, encoding="utf-8").read()
+          # 替换 APP_VERSION 整行：getenv 默认值 + 末尾 or 兜底值都改成本次版本号
+          new, n = re.subn(
+              r'^APP_VERSION\s*=\s*os\.getenv\(\s*["\']FMS_APP_VERSION["\']\s*,\s*["\'][^"\']*["\']\s*\)\.strip\(\)\s*or\s*["\'][^"\']*["\'].*$',
+              'APP_VERSION = os.getenv("FMS_APP_VERSION", "%s").strip() or "%s"' % (ver, ver),
+              s,
+              count=1,
+              flags=re.M,
+          )
+          if n != 1:
+              print("::error::未能在 state.py 中定位 APP_VERSION 行，替换失败")
+              sys.exit(1)
+          io.open(path, "w", encoding="utf-8").write(new)
+          print("已将 state.py 的 APP_VERSION 固化为:", ver)
+          PY
+          grep -n "APP_VERSION" state.py
+
+      # 5) PyInstaller 打包（onedir 模式 -> dist/FMS_UPDATE_MANAGER/）
+      - name: Build with PyInstaller
+        shell: bash
+        env:
+          FMS_APP_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          python -m PyInstaller --noconfirm --clean FMS_UPDATE_MANAGER.spec
+          test -f "dist/FMS_UPDATE_MANAGER/FMS_UPDATE_MANAGER.exe" || (echo "EXE 未生成" && exit 1)
+
+      # 6) 安装 WiX v4 工具链 + 所需扩展
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 4.0.5
+          wix extension add -g WixToolset.Util.wixext/4.0.5
+          wix extension add -g WixToolset.UI.wixext/4.0.5
+
+      # 7) 用 WiX 生成 MSI
+      - name: Build MSI
+        shell: pwsh
+        env:
+          FMS_APP_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $msi = "installer/FMS Update Manager $ver.msi"
+          wix build -arch x64 `
+            -ext WixToolset.Util.wixext `
+            -ext WixToolset.UI.wixext `
+            -d "SourceDir=$PWD\dist\FMS_UPDATE_MANAGER" `
+            -d "ProjectDir=$PWD" `
+            -d "ProductVersion=$ver" `
+            -d "WixUILicenseRtf=$PWD\installer\license.rtf" `
+            -o "$msi" `
+            "installer/FMS_UPDATE_MANAGER.wxs"
+          if (-not (Test-Path "$msi")) { Write-Error "MSI 未生成"; exit 1 }
+          "msi_path=$msi" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        id: msi
+
+      # 8) 生成便携版 ZIP（直接压缩 onedir 输出）
+      - name: Build portable ZIP
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $zip = "installer/FMS Update Manager $ver Portable.zip"
+          # portable.flag 让程序识别为便携模式（与本地 build_signed.bat 行为一致）
+          New-Item -ItemType File -Path "dist/FMS_UPDATE_MANAGER/portable.flag" -Force | Out-Null
+          if (Test-Path "$zip") { Remove-Item "$zip" -Force }
+          Compress-Archive -Path "dist/FMS_UPDATE_MANAGER/*" -DestinationPath "$zip" -Force
+          if (-not (Test-Path "$zip")) { Write-Error "ZIP 未生成"; exit 1 }
+          "zip_path=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        id: zip
+
+      # 9) 上传 MSI 为构建产物
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMS-Update-Manager-${{ steps.ver.outputs.version }}-MSI
+          path: ${{ steps.msi.outputs.msi_path }}
+          if-no-files-found: error
+
+      # 10) 上传便携 ZIP 为构建产物
+      - name: Upload portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMS-Update-Manager-${{ steps.ver.outputs.version }}-Portable
+          path: ${{ steps.zip.outputs.zip_path }}
+          if-no-files-found: error
+
