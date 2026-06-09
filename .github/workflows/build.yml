@@ -58,6 +58,8 @@ jobs:
         env:
           INPUT_VER: ${{ github.event.inputs.app_version }}
           RUN_NUMBER: ${{ github.run_number }}
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
           VER=$(python - <<'PY'
           import re, io, os, sys
@@ -78,8 +80,8 @@ jobs:
           offset = int(os.environ.get("RUN_NUMBER", "1")) - 1
           n = base_n + offset
           if n > 999:
-              print("::error::版本号已超过上限 9.9.9（基准 %s + 偏移 %d）。"
-                    "请在 state.py 中下调或重置 APP_VERSION。" % (base, offset),
+              print("::error::Version exceeds max 9.9.9 (base %s + offset %d). "
+                    "Lower or reset APP_VERSION in state.py." % (base, offset),
                     file=sys.stderr)
               sys.exit(1)
           print("%d.%d.%d" % (n // 100 % 10, n // 10 % 10, n % 10))
@@ -97,6 +99,8 @@ jobs:
         shell: bash
         env:
           VER: ${{ steps.ver.outputs.version }}
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
           python - "$VER" <<'PY'
           import re, io, sys
@@ -112,10 +116,10 @@ jobs:
               flags=re.M,
           )
           if n != 1:
-              print("::error::未能在 state.py 中定位 APP_VERSION 行，替换失败")
+              print("::error::Could not locate APP_VERSION line in state.py")
               sys.exit(1)
           io.open(path, "w", encoding="utf-8").write(new)
-          print("已将 state.py 的 APP_VERSION 固化为:", ver)
+          print("Stamped APP_VERSION =", ver)
           PY
           grep -n "APP_VERSION" state.py
 
