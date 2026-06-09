@@ -28,7 +28,9 @@
     </StandardDirectory>
 
     <Feature Id="MainFeature" Title="FMS Update Manager" Level="1">
-      <ComponentGroupRef Id="AppFiles" />
+      <!-- 自动收集 PyInstaller 输出目录下的所有文件到 INSTALLFOLDER。
+           Files 元素的合法父元素是 Feature/Directory/Fragment，不能放在 ComponentGroup 内。 -->
+      <Files Include="$(var.SourceDir)\**" Directory="INSTALLFOLDER" />
       <ComponentGroupRef Id="StartMenuShortcutComponents" />
       <ComponentGroupRef Id="InstallFolderRegistry" />
       <Feature Id="DesktopShortcutFeature" Title="Desktop Shortcut"
@@ -82,12 +84,6 @@
         <RegistryValue Root="HKLM" Key="Software\CNRPG\FMS Update Manager"
                        Name="InstallFolder" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
       </Component>
-    </ComponentGroup>
-  </Fragment>
-
-  <Fragment>
-    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
-      <Files Include="$(var.SourceDir)\**" />
     </ComponentGroup>
   </Fragment>
 </Wix>
