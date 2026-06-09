@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_data_files
 
-datas = [('assets', 'assets')]
+datas = [('assets', 'assets'), ('navigraph_catalog_2605.json', '.')]
 datas += collect_data_files('flet')
 try:
     datas += collect_data_files('SimConnect')

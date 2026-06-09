@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -181,11 +182,20 @@ def _looks_like_path(source: str | Path) -> bool:
 
 def load_bundled_catalog() -> list[NavigraphPackage]:
     """Load the offline catalog shipped alongside this module (empty on failure)."""
-    path = Path(__file__).resolve().parent / BUNDLED_CATALOG_NAME
-    try:
-        return parse_navigraph_manifest(path)
-    except Exception:
-        return []
+    # In a PyInstaller build the JSON is collected into the bundle root
+    # (sys._MEIPASS); in dev it sits next to this module. Try both.
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / BUNDLED_CATALOG_NAME)
+    candidates.append(Path(__file__).resolve().parent / BUNDLED_CATALOG_NAME)
+    for path in candidates:
+        try:
+            if path.exists():
+                return parse_navigraph_manifest(path)
+        except Exception:
+            continue
+    return []
 
 
 def _friendly_name(pkg: NavigraphPackage) -> str:
