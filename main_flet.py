@@ -5505,6 +5505,22 @@ def main(  # pylint: disable=too-many-function-args,unexpected-keyword-arg,no-me
         page.run_task(refresh_backup_power_login_validity, False)
 
 
+def _point_flet_to_bundled_client() -> None:
+    """打包运行时，让 flet 使用随包附带的桌面客户端，避免联网下载。
+
+    flet_desktop 解析客户端时优先级为 build/windows -> FLET_VIEW_PATH ->
+    本地缓存 -> 从 GitHub 下载。打包时已把 Flutter 客户端放进 _internal/flet_bin/flet，
+    这里把 FLET_VIEW_PATH 指向它即可命中第 2 步，跳过最后的联网下载（受限网络会
+    以 WinError 10060 超时崩溃）。
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    base = getattr(sys, "_MEIPASS", None) or Path(sys.executable).resolve().parent
+    client_dir = Path(base) / "flet_bin" / "flet"
+    if (client_dir / "flet.exe").is_file():
+        os.environ.setdefault("FLET_VIEW_PATH", str(client_dir))
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--updater":
         from incremental_update import run_updater_mode
@@ -5517,4 +5533,5 @@ if __name__ == "__main__":
             pass
         sys.exit(0)
     if _ensure_installer_not_running():
+        _point_flet_to_bundled_client()
         ft.run(main)

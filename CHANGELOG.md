@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.3 - 2026-06-11
+
+### 修复
+
+- **打包版首次启动联网下载 flet 客户端导致崩溃**：此前 PyInstaller 产物未包含 Flet 桌面客户端（Flutter 编译产物），程序首次启动时 `flet_desktop` 会尝试从 GitHub Releases 下载 `flet-windows.zip`，在网络受限/被墙环境下以 `WinError 10060` 超时崩溃。现在改为打包阶段把客户端整目录塞进 `_internal/flet_bin/flet`，运行时通过 `FLET_VIEW_PATH` 指向它，彻底离线，不再联网（[FMS_UPDATE_MANAGER.spec](FMS_UPDATE_MANAGER.spec#L18-L33)、[main_flet.py:5508](main_flet.py#L5508)）。
+
+### 构建
+
+- **`FMS_UPDATE_MANAGER.spec` 在打包阶段缓存并收集 Flet 客户端**：调用 `flet_desktop.ensure_client_cached()`（构建机可正常访问 GitHub）下载/解压客户端，遍历整目录加入 `datas`，保持 `data/` 子目录层级。MSI（WiX 递归 harvest）与便携 ZIP 均自动收录新增文件，无需改 wxs 或工作流。
+
 ## 1.1.2 - 2026-06-15
 
 ### 客户端
