@@ -344,5 +344,94 @@ class ExternalFolderStatusTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class A346Wasm2024RedirectTests(unittest.TestCase):
+    SIM = "MSFS 2024"
+    PLAT = "Steam"
+    PKG = "aerosoft-aircraft-a346-pro"
+
+    def _addon(self) -> Addon:
+        return Addon(
+            name="Aerosoft A340-600 Pro",
+            description="Aerosoft Airbus A340-600 Pro",
+            simulator=self.SIM,
+            platform=self.PLAT,
+            target_path="",
+            package_name=self.PKG,
+            navdata_subpath=r"work\FMSData",
+        )
+
+    def _state(self, community: Path, wasm2024: Path) -> dict:
+        from state import community_key
+
+        key = community_key(self.SIM, self.PLAT)
+        return {
+            "community_paths": {key: str(community)},
+            "wasm_scan_paths": {key: [str(wasm2024)]},
+        }
+
+    def _write_manifest(self, community: Path, version: str) -> None:
+        import json
+
+        pkg_dir = community / self.PKG
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "manifest.json").write_text(
+            json.dumps({"package_version": version}), encoding="utf-8"
+        )
+
+    def test_old_version_stays_in_community(self) -> None:
+        import tempfile, shutil
+        import catalog
+        from catalog import resolve_target_dir, a346_should_redirect_to_wasm2024
+
+        tmp = Path(tempfile.mkdtemp())
+        orig_defaults = catalog.default_wasm_scan_bases
+        catalog.default_wasm_scan_bases = lambda *a, **k: []
+        try:
+            community = tmp / "Community"
+            wasm2024 = tmp / "WASM" / "MSFS2024"
+            self._write_manifest(community, "1.0.2")
+            # Community navdata present (with cycle.json so it resolves).
+            cdata = community / self.PKG / "work" / "FMSData"
+            cdata.mkdir(parents=True)
+            (cdata / "cycle.json").write_text('{"name": "ToLiss"}', encoding="utf-8")
+
+            a = self._addon()
+            state = self._state(community, wasm2024)
+            self.assertFalse(a346_should_redirect_to_wasm2024(a, state))
+            target = resolve_target_dir(a, state)
+            self.assertIsNotNone(target)
+            self.assertIn("Community", str(target))
+        finally:
+            catalog.default_wasm_scan_bases = orig_defaults
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_new_version_redirects_to_wasm2024(self) -> None:
+        import tempfile, shutil
+        import catalog
+        from catalog import resolve_target_dir, a346_should_redirect_to_wasm2024
+
+        tmp = Path(tempfile.mkdtemp())
+        orig_defaults = catalog.default_wasm_scan_bases
+        catalog.default_wasm_scan_bases = lambda *a, **k: []
+        try:
+            community = tmp / "Community"
+            wasm2024 = tmp / "WASM" / "MSFS2024"
+            self._write_manifest(community, "1.0.3")
+            wdata = wasm2024 / self.PKG / "work" / "FMSData"
+            wdata.mkdir(parents=True)
+            (wdata / "cycle.json").write_text('{"name": "ToLiss"}', encoding="utf-8")
+
+            a = self._addon()
+            state = self._state(community, wasm2024)
+            self.assertTrue(a346_should_redirect_to_wasm2024(a, state))
+            target = resolve_target_dir(a, state)
+            self.assertIsNotNone(target)
+            self.assertIn("MSFS2024", str(target))
+            self.assertIn(self.PKG, str(target))
+        finally:
+            catalog.default_wasm_scan_bases = orig_defaults
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

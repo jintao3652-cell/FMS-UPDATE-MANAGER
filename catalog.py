@@ -17,7 +17,7 @@ from targets import (
     sim_base_navdata_required_subfolders,
     text_matches_addon_signature,
 )
-from utils import detect_airac
+from utils import detect_airac, version_at_least
 
 CYCLE_JSON_SCAN_CACHE: dict[tuple[str, ...], list[Path]] = {}
 
@@ -492,6 +492,76 @@ def read_a346_builtin_cycle(addon: Addon, state: dict | None = None) -> tuple[st
     return None
 
 
+# Aerosoft A346 in MSFS 2024 moved its navdata out of Community and into the
+# WASM\MSFS2024 tree starting with package_version 1.0.3. Earlier builds (<=
+# 1.0.2) keep the data under Community/aerosoft-aircraft-a346-pro. We decide per
+# install by reading package_version from the Community manifest.json.
+A346_WASM2024_MIN_VERSION = "1.0.3"
+
+
+def read_a346_community_version(addon: Addon, state: dict | None = None) -> str:
+    """Read ``package_version`` from the A346 manifest.json under Community.
+
+    The manifest always ships inside the Community package folder, so this is a
+    reliable signal even after the navdata itself moves to WASM. Returns "" when
+    the package folder or manifest is absent.
+    """
+    if not is_a346_addon(addon):
+        return ""
+    package_name = infer_package_name(addon)
+    if not package_name:
+        return ""
+    for base in community_base_candidates(state, addon.simulator, addon.platform, addon):
+        if not base:
+            continue
+        version = read_plugin_version_from_dir(Path(base) / package_name)
+        if version:
+            return version
+    return ""
+
+
+def a346_should_redirect_to_wasm2024(addon: Addon, state: dict | None = None) -> bool:
+    """True when this A346 install should target WASM2024 instead of Community.
+
+    Only applies to MSFS 2024 and only when the Community manifest reports
+    package_version >= 1.0.3.
+    """
+    if not is_a346_addon(addon) or addon.simulator != "MSFS 2024":
+        return False
+    return version_at_least(read_a346_community_version(addon, state), A346_WASM2024_MIN_VERSION)
+
+
+def resolve_a346_wasm2024_target(addon: Addon, state: dict | None = None) -> Path | None:
+    """Resolve the A346 navdata target under WASM\\MSFS2024 (same folder name).
+
+    Returns the existing ``WASM2024/<package>[/<navdata_subpath>]`` path (or a
+    nested cycle dir within it) when present; otherwise returns the prospective
+    path under the first WASM2024 base so a fresh install can create it. Returns
+    None when no WASM2024 base is configured.
+    """
+    package_name = infer_package_name(addon)
+    if not package_name:
+        return None
+    bases = [
+        base
+        for base in wasm_base_candidates(addon.simulator, addon.platform, state)
+        if "msfs2024" in base.replace("\\", "/").lower()
+    ]
+    if not bases:
+        return None
+    prospective: Path | None = None
+    for base in bases:
+        candidate = Path(base) / package_name
+        if addon.navdata_subpath:
+            candidate = candidate / addon.navdata_subpath
+        if prospective is None:
+            prospective = candidate
+        if candidate.exists():
+            nested = find_nested_cycle_dir(candidate, addon)
+            return nested if nested is not None else candidate
+    return prospective
+
+
 def is_external_folder_addon(addon: Addon) -> bool:
     """True for catalog packages that install into a fixed external folder.
 
@@ -588,6 +658,12 @@ def resolve_target_dir(addon: Addon, state: dict | None = None) -> Path | None:
         if target is not None and target.exists() and target.is_dir():
             return target
         return None
+
+    if a346_should_redirect_to_wasm2024(addon, state):
+        # A346 >= 1.0.3 keeps its navdata under WASM\MSFS2024, not Community.
+        wasm2024 = resolve_a346_wasm2024_target(addon, state)
+        if wasm2024 is not None:
+            return wasm2024
 
     if state is not None and addon_prefers_community(addon):
         for base in community_base_candidates(state, addon.simulator, addon.platform, addon):

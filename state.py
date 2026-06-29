@@ -39,7 +39,7 @@ if PORTABLE_ROOT is not None:
     LOCAL_DIR = PORTABLE_ROOT / "local"
 STATE_FILE = ROAMING_DIR / "state.json"
 BACKUP_DIR = LOCAL_DIR / "backups"
-APP_VERSION = os.getenv("FMS_APP_VERSION", "1.1.3").strip() or "1.1.0"
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.1.4").strip() or "1.1.0"
 MSFS_VERSIONS = ["MSFS 2024", "MSFS 2020"]
 PLATFORMS = ["Xbox/MS Store", "Steam"]
 THEME_LIGHT = "Light Mode"

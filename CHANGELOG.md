@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.4 - 2026-06-29
+
+### 客户端
+
+- **Aerosoft A346（MSFS 2024）按 package_version 重定向导航数据路径**：读取 `Community\aerosoft-aircraft-a346-pro\manifest.json` 的 `package_version`，`<= 1.0.2` 保持现状（数据仍在 Community），`>= 1.0.3` 自动把目标路径重定向到 `WASM\MSFS2024` 下的同名文件夹（`WASM\MSFS2024\aerosoft-aircraft-a346-pro\work\FMSData`）。manifest 始终从 Community 读取，因此即使数据已搬到 WASM 仍能正确判定；WASM 目标只匹配 `MSFS2024` 目录，不会误落到 `MSFS2020`（[catalog.py:662](catalog.py#L662)）。
+- **状态显示与安装目标一致**：重定向在 `resolve_target_dir` 通用 Community/WASM 扫描之前生效，列表状态、AIRAC 读取与实际安装写入统一指向同一目标，未安装时回退路径在 `WASM2024` 下创建（[catalog.py](catalog.py) `a346_should_redirect_to_wasm2024`、`resolve_a346_wasm2024_target`）。
+
+### 构建 / 目录
+
+- **`utils.py` 新增 `version_at_least(version, minimum)`**：复用既有版本号解析做点分十进制比较，版本号缺失或不可解析时一律返回 False，确保读不到 manifest 时不会误触发重定向（[utils.py:225](utils.py#L225)）。
+
+### 测试
+
+- 新增 `A346Wasm2024RedirectTests`：覆盖 `<= 1.0.2` 留在 Community、`>= 1.0.3` 重定向到 `WASM\MSFS2024` 两种路径解析。全套 24 个用例通过（[tests/test_navigraph_catalog.py](tests/test_navigraph_catalog.py)）。
+
 ## 1.1.3 - 2026-06-11
 
 ### 修复

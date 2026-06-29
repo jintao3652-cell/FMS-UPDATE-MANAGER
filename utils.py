@@ -222,6 +222,22 @@ def _is_newer_version(latest: str, current: str) -> bool:
     return left > right
 
 
+def version_at_least(version: str, minimum: str) -> bool:
+    """True if ``version`` >= ``minimum`` (numeric, dotted-version compare).
+
+    Returns False when ``version`` has no parsable numbers, so a missing or
+    unreadable version never satisfies the threshold.
+    """
+    current = _parse_version_numbers(version)
+    threshold = _parse_version_numbers(minimum)
+    if not current or not threshold:
+        return False
+    width = max(len(current), len(threshold))
+    left = current + (0,) * (width - len(current))
+    right = threshold + (0,) * (width - len(threshold))
+    return left >= right
+
+
 def format_version_display(raw: str) -> str:
     parts = _parse_version_numbers(raw)
     if parts:
