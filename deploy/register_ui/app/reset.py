@@ -76,7 +76,6 @@ def healthz():
     return {"ok": True, "service": "fms-password-reset-ui"}
 
 
-@app.get("/", response_class=HTMLResponse)
 @app.get("/resetpassword", response_class=HTMLResponse)
 def reset_page():
     site_key = get_site_key()
