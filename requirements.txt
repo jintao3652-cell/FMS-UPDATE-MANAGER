@@ -1,3 +1,4 @@
 flet==0.85.1
+flet-desktop==0.85.1
 psutil>=5.9
 SimConnect>=0.4.26
