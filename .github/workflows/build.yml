@@ -140,6 +140,8 @@ jobs:
         run: |
           dotnet tool install --global wix
           wix --version
+          # WiX v7 需要 OSMF EULA；CI 中用 per-user 接受（wixtoolset.org/osmf）
+          wix eula accept wix7
           wix extension add -g WixToolset.Util.wixext
           wix extension add -g WixToolset.UI.wixext
 
