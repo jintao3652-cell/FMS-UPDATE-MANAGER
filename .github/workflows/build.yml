@@ -132,13 +132,16 @@ jobs:
           python -m PyInstaller --noconfirm --clean FMS_UPDATE_MANAGER.spec
           test -f "dist/FMS_UPDATE_MANAGER/FMS_UPDATE_MANAGER.exe" || (echo "EXE 未生成" && exit 1)
 
-      # 6) 安装 WiX v4 工具链 + 所需扩展
+      # 6) 安装 WiX 工具链 + 所需扩展
+      #    注意：必须用最新版 WiX（本地构建用的是 WiX 7）。wxs 中 <Files> 挂在
+      #    <Feature> 下是 WiX 5+ 语法，WiX 4.0.5 会报 WIX0005（历史上 4.0.5 从未构建成功）。
       - name: Install WiX Toolset
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 4.0.5
-          wix extension add -g WixToolset.Util.wixext/4.0.5
-          wix extension add -g WixToolset.UI.wixext/4.0.5
+          dotnet tool install --global wix
+          wix --version
+          wix extension add -g WixToolset.Util.wixext
+          wix extension add -g WixToolset.UI.wixext
 
       # 7) 用 WiX 生成 MSI
       - name: Build MSI
