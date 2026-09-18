@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
 import json
+import time
 from typing import Any
 
+import httpx
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -861,3 +863,276 @@ def pending_users(_admin: User = Depends(get_current_admin), db: Session = Depen
             for u in rows
         ],
     }
+
+
+# --------------------------------------------------------------------------
+# 注册 / 重置密码：静态页 + 同源反代到 auth_api
+# 这些接口的业务逻辑（验证码、限流、邀请码、Turnstile 校验）保留在 auth_api，
+# 本容器只做同源反代，浏览器请求同源 /api/... 即可，无跨域、无需暴露 17306。
+# --------------------------------------------------------------------------
+
+_PROXY_HOP_HEADERS = {
+    "host", "content-length", "connection", "keep-alive", "transfer-encoding",
+    "upgrade", "proxy-authenticate", "proxy-authorization", "te", "trailers",
+}
+_PROXY_RESPONSE_STRIP_HEADERS = _PROXY_HOP_HEADERS | {"content-encoding"}
+
+
+async def _proxy_to_auth(request: Request, path: str) -> Response:
+    upstream = f"{settings.auth_api_url.rstrip('/')}/{path}"
+    body = await request.body()
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _PROXY_HOP_HEADERS}
+    ip = request.client.host if request.client else ""
+    if ip:
+        prior = headers.get("x-forwarded-for")
+        headers["x-forwarded-for"] = f"{prior}, {ip}" if prior else ip
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.request(
+                request.method, upstream, content=body, headers=headers,
+                params=request.query_params,
+            )
+    except httpx.RequestError as exc:
+        return Response(
+            content=f'{{"detail":"upstream unreachable: {type(exc).__name__}: {exc}"}}',
+            status_code=502,
+            media_type="application/json",
+        )
+    resp_headers = {k: v for k, v in r.headers.items() if k.lower() not in _PROXY_RESPONSE_STRIP_HEADERS}
+    return Response(content=r.content, status_code=r.status_code, headers=resp_headers)
+
+
+@app.post("/api/auth/register/code")
+async def proxy_register_code(request: Request):
+    return await _proxy_to_auth(request, "api/auth/register/code")
+
+
+@app.post("/api/auth/register")
+async def proxy_register(request: Request):
+    return await _proxy_to_auth(request, "api/auth/register")
+
+
+@app.post("/api/auth/password_reset/code")
+async def proxy_password_reset_code(request: Request):
+    return await _proxy_to_auth(request, "api/auth/password_reset/code")
+
+
+@app.post("/api/auth/password_reset")
+async def proxy_password_reset(request: Request):
+    return await _proxy_to_auth(request, "api/auth/password_reset")
+
+
+@app.get("/api/public/turnstile_site_key")
+async def proxy_turnstile_site_key(request: Request):
+    return await _proxy_to_auth(request, "api/public/turnstile_site_key")
+
+
+@app.get("/api/public/register_policy")
+async def proxy_register_policy(request: Request):
+    return await _proxy_to_auth(request, "api/public/register_policy")
+
+
+_site_key_cache: dict = {"value": "", "ts": 0.0}
+_SITE_KEY_CACHE_TTL = 60.0
+
+
+def get_site_key() -> str:
+    now = time.time()
+    if now - _site_key_cache["ts"] < _SITE_KEY_CACHE_TTL and _site_key_cache["ts"] > 0:
+        return _site_key_cache["value"]
+    try:
+        r = httpx.get(f"{settings.auth_api_url.rstrip('/')}/api/public/turnstile_site_key", timeout=5)
+        if r.status_code == 200:
+            _site_key_cache["value"] = (r.json().get("site_key") or "").strip()
+        else:
+            _site_key_cache["value"] = ""
+    except Exception:
+        _site_key_cache["value"] = ""
+    _site_key_cache["ts"] = now
+    return _site_key_cache["value"]
+
+
+def _turnstile_markup(site_key: str) -> tuple[str, str]:
+    if site_key:
+        script = '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>'
+        widget = f'<div id="cf-turnstile-widget" class="cf-turnstile" data-sitekey="{site_key}" data-theme="dark"></div>'
+        return script, widget
+    return "", ""
+
+
+@app.get("/register", response_class=HTMLResponse)
+@app.get("/zhuce", response_class=HTMLResponse)
+def register_page():
+    site_key = get_site_key()
+    turnstile_script, turnstile_widget = _turnstile_markup(site_key)
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FMS 用户注册</title>
+{turnstile_script}
+<style>
+body{{margin:0;font-family:Segoe UI,Arial,sans-serif;background:radial-gradient(circle at top,#0f203c 0,#07111f 40%,#050b14 100%);color:#e6eefc;min-height:100vh}}
+.wrap{{max-width:580px;margin:0 auto;padding:40px 20px}}
+.card{{background:rgba(12,23,41,.92);border:1px solid #21324c;border-radius:16px;padding:24px;box-shadow:0 18px 46px rgba(0,0,0,.32);backdrop-filter:blur(14px)}}
+h2{{margin:0 0 12px;letter-spacing:.4px}}
+p{{color:#8ea3c7;line-height:1.6}}
+input,button{{width:100%;box-sizing:border-box;margin:8px 0;padding:12px 14px;border-radius:12px;border:1px solid #21324c;background:#09111d;color:#e6eefc;font-size:14px}}
+button{{background:linear-gradient(180deg,#29b6f6,#1958c4);border:none;cursor:pointer;font-weight:600;color:#fff}}
+button:hover{{filter:brightness(1.08)}}
+.row{{display:flex;gap:10px;align-items:center}}
+.row>*{{flex:1}}
+.msg{{white-space:pre-wrap;background:#09111d;border:1px solid #21324c;border-radius:12px;padding:12px;min-height:56px;margin-top:10px;color:#cdd9ef;font-size:13px}}
+.tiny{{font-size:12px;color:#8ea3c7;margin-top:8px}}
+.cf-turnstile-slot{{margin:10px 0}}
+</style></head><body>
+<div class="wrap"><div class="card">
+<h2>FMS 用户注册</h2>
+<p>请填写昵称、邮箱和密码。先获取邮箱验证码，再完成注册。</p>
+<input id="name" placeholder="昵称">
+<input id="email" placeholder="邮箱">
+<input id="password" placeholder="密码" type="password">
+<div class="row">
+  <input id="email_code" placeholder="邮箱验证码">
+  <button style="max-width:160px" onclick="sendCode()">发送验证码</button>
+</div>
+<input id="invite_code" placeholder="邀请码（如需要）" style="display:none">
+<div class="cf-turnstile-slot">{turnstile_widget}</div>
+<button onclick="registerUser()">注册</button>
+<div id="out" class="msg">等待操作。</div>
+<div class="tiny">如果收不到验证码，请联系管理员检查 SMTP 配置。<br>忘记密码？请前往 <a href="/resetpsw" style="color:#29b6f6">重置密码页面</a>。</div>
+</div></div>
+<script>
+const out = document.getElementById('out');
+function getTurnstileToken(){{const el=document.querySelector('input[name="cf-turnstile-response"]');return el?el.value.trim():'';}}
+function resetTurnstile(){{
+  try{{
+    if(window.turnstile){{
+      const el=document.getElementById('cf-turnstile-widget');
+      if(el) window.turnstile.reset(el);
+    }}
+  }}catch(e){{}}
+}}
+async function sendCode(){{
+  const token=getTurnstileToken();
+  if(!token){{out.textContent='请先完成人机验证（Turnstile）';return;}}
+  const payload={{name:document.getElementById('name').value.trim(),email:document.getElementById('email').value.trim(),turnstile_token:token}};
+  try{{
+    const r=await fetch('/api/auth/register/code',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+    out.textContent=await r.text();
+  }}catch(e){{out.textContent='请求失败：'+e;}}
+  resetTurnstile();
+}}
+async function registerUser(){{
+  const token=getTurnstileToken();
+  if(!token){{out.textContent='请先完成人机验证（Turnstile）';return;}}
+  const payload={{name:document.getElementById('name').value.trim(),email:document.getElementById('email').value.trim(),password:document.getElementById('password').value,email_code:document.getElementById('email_code').value.trim(),turnstile_token:token}};
+  const inv=document.getElementById('invite_code');
+  if(inv && inv.style.display !== 'none'){{
+    const v=inv.value.trim();
+    if(!v){{out.textContent='请输入邀请码';resetTurnstile();return;}}
+    payload.invite_code=v;
+  }}
+  try{{
+    const r=await fetch('/api/auth/register',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+    const txt=await r.text();
+    let parsed=null;
+    try{{ parsed=JSON.parse(txt); }}catch(_){{}}
+    if(parsed && parsed.pending_approval){{
+      out.textContent='注册成功，账号待管理员审核后方可登录。';
+    }}else{{
+      out.textContent=txt;
+    }}
+  }}catch(e){{out.textContent='请求失败：'+e;}}
+  resetTurnstile();
+}}
+async function loadRegisterPolicy(){{
+  try{{
+    const r=await fetch('/api/public/register_policy');
+    if(!r.ok) return;
+    const p=await r.json();
+    if(p && p.require_invite_code){{
+      const inv=document.getElementById('invite_code');
+      if(inv) inv.style.display='block';
+    }}
+  }}catch(e){{}}
+}}
+loadRegisterPolicy();
+</script></body></html>"""
+
+
+@app.get("/resetpsw", response_class=HTMLResponse)
+@app.get("/resetpassword", response_class=HTMLResponse)
+def reset_page():
+    site_key = get_site_key()
+    turnstile_script, turnstile_widget = _turnstile_markup(site_key)
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FMS 重置密码</title>
+{turnstile_script}
+<style>
+body{{margin:0;font-family:Segoe UI,Arial,sans-serif;background:radial-gradient(circle at top,#0f203c 0,#07111f 40%,#050b14 100%);color:#e6eefc;min-height:100vh}}
+.wrap{{max-width:520px;margin:0 auto;padding:48px 20px}}
+.card{{background:rgba(12,23,41,.92);border:1px solid #21324c;border-radius:16px;padding:28px;box-shadow:0 18px 46px rgba(0,0,0,.32);backdrop-filter:blur(14px)}}
+h2{{margin:0 0 12px;letter-spacing:.4px}}
+p{{color:#8ea3c7;line-height:1.6;font-size:14px}}
+input,button{{width:100%;box-sizing:border-box;margin:8px 0;padding:12px 14px;border-radius:12px;border:1px solid #21324c;background:#09111d;color:#e6eefc;font-size:14px;font-family:inherit}}
+input:focus{{outline:none;border-color:#29b6f6}}
+button{{background:linear-gradient(180deg,#29b6f6,#1958c4);border:none;cursor:pointer;font-weight:600;color:#fff}}
+button:hover{{filter:brightness(1.08)}}
+.row{{display:flex;gap:10px;align-items:center}}
+.row>*{{flex:1}}
+.row>button{{max-width:170px}}
+.msg{{white-space:pre-wrap;background:#09111d;border:1px solid #21324c;border-radius:12px;padding:12px;min-height:48px;margin-top:12px;color:#cdd9ef;font-size:13px}}
+.tiny{{font-size:12px;color:#8ea3c7;margin-top:8px}}
+.cf-turnstile-slot{{margin:12px 0}}
+</style></head><body>
+<div class="wrap"><div class="card">
+<h2>FMS 重置密码</h2>
+<p>请输入您的注册邮箱，发送验证码后设置新密码。</p>
+<input id="email" placeholder="注册邮箱" autocomplete="email">
+<div class="row">
+  <input id="email_code" placeholder="邮箱验证码">
+  <button onclick="sendResetCode()">发送验证码</button>
+</div>
+<input id="new_password" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password">
+<div class="cf-turnstile-slot">{turnstile_widget}</div>
+<button onclick="resetPassword()">重置密码</button>
+<div id="out" class="msg">等待操作。</div>
+<div class="tiny">如果收不到验证码，请检查垃圾箱或联系管理员检查 SMTP 配置。<br>返回 <a href="/register" style="color:#29b6f6">注册页面</a>。</div>
+</div></div>
+<script>
+const out = document.getElementById('out');
+function getTurnstileToken(){{const el=document.querySelector('input[name="cf-turnstile-response"]');return el?el.value.trim():'';}}
+function resetTurnstile(){{
+  try{{
+    if(window.turnstile){{
+      const el=document.getElementById('cf-turnstile-widget');
+      if(el) window.turnstile.reset(el);
+    }}
+  }}catch(e){{}}
+}}
+async function sendResetCode(){{
+  const token=getTurnstileToken();
+  if(!token){{out.textContent='请先完成人机验证（Turnstile）';return;}}
+  const payload={{email:document.getElementById('email').value.trim(),turnstile_token:token}};
+  try{{
+    const r=await fetch('/api/auth/password_reset/code',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+    out.textContent=await r.text();
+  }}catch(e){{out.textContent='请求失败：'+e;}}
+  resetTurnstile();
+}}
+async function resetPassword(){{
+  const token=getTurnstileToken();
+  if(!token){{out.textContent='请先完成人机验证（Turnstile）';return;}}
+  const payload={{
+    email:document.getElementById('email').value.trim(),
+    email_code:document.getElementById('email_code').value.trim(),
+    new_password:document.getElementById('new_password').value,
+    turnstile_token:token,
+  }};
+  try{{
+    const r=await fetch('/api/auth/password_reset',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+    out.textContent=await r.text();
+  }}catch(e){{out.textContent='请求失败：'+e;}}
+  resetTurnstile();
+}}
+</script></body></html>"""

@@ -33,6 +33,7 @@ dump_once() {
         --hex-blob \
         --default-character-set=utf8mb4 \
         --set-gtid-purged=OFF \
+        --no-tablespaces \
         "$MYSQL_DATABASE" \
       | gzip -9 > "$tmp"; then
     mv "$tmp" "$out"

@@ -14,6 +14,6 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 COPY app ./app
 
-EXPOSE 1145
+EXPOSE 3090
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "1145"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3090"]

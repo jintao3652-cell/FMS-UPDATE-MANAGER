@@ -1,6 +1,6 @@
-# FMS Admin Panel
+# FMS Web（注册 / 重置密码 / 管理后台）
 
-管理后台（默认端口 1145）。
+单一容器，端口 3090。提供注册页 `/register`(`/zhuce`)、重置密码页 `/resetpsw`(`/resetpassword`)、管理后台 `/admin`；注册/重置相关 `/api/*` 同源反代到 `auth_api`。
 
 ## 部署
 
@@ -13,7 +13,7 @@ chmod 600 .env
 docker compose up -d --build
 ```
 
-访问 `http://<server>:1145/admin` 登录后台。
+访问 `http://<server>:3090/admin` 登录后台。
 
 ## 集中管理项
 

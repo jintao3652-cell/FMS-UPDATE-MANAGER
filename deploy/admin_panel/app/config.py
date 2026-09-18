@@ -12,11 +12,12 @@ class Settings:
     admin_username: str = os.getenv("APP_ADMIN_USERNAME", "").strip()
     admin_password: str = os.getenv("APP_ADMIN_PASSWORD", "").strip()
     allowed_origins: str = os.getenv("APP_ALLOWED_ORIGINS", "*").strip()
-    bind_port: int = int(os.getenv("APP_ADMIN_PORT", "1145"))
+    bind_port: int = int(os.getenv("APP_WEB_PORT", "3090"))
     openlist_base_url: str = os.getenv("APP_OPENLIST_BASE_URL", "http://main.cnrpg.top:5245").strip().rstrip("/")
     openlist_username: str = os.getenv("APP_OPENLIST_USERNAME", "navdata").strip()
     openlist_password: str = os.getenv("APP_OPENLIST_PASSWORD", "navdata").strip()
     openlist_root_path: str = os.getenv("APP_OPENLIST_ROOT_PATH", "/").strip() or "/"
+    auth_api_url: str = os.getenv("APP_AUTH_API_URL", "http://auth_api:17306").strip().rstrip("/")
 
 
 settings = Settings()

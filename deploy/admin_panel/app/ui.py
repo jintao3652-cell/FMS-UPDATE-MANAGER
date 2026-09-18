@@ -82,7 +82,7 @@ label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
   <div class="grid">
     <aside class="panel side">
       <div class="title">FMS Admin</div>
-      <div class="sub">1145 管理端 · 用户/SMTP/Turnstile/日志</div>
+      <div class="sub">管理端 · 用户/SMTP/Turnstile/日志</div>
       <div class="nav">
         <button data-page="dashboard" class="active" onclick="switchPage('dashboard')">仪表盘</button>
         <button data-page="users" onclick="switchPage('users')">用户管理</button>
