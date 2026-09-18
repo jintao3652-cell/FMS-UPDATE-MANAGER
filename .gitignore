@@ -40,3 +40,12 @@ __push_tmp_repo/
 
 # Local build output (CI produces the official MSI/ZIP artifacts)
 installer_out/
+
+# Misplaced PyInstaller onedir output
+/test/
+
+# Unpacked portable artifacts
+installer/*Portable/
+
+# WorkBuddy workspace data
+.workbuddy/

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.1.6 - 2026-09-18
+
+### 客户端
+
+- **新增 iniBuilds A380 机型支持**：MSFS 2024（Steam / Xbox）列表新增 "iniBuilds A380"，导航数据目标为 `inibuilds-aircraft-a380\work\NavigationData`，优先扫描 WASM\MSFS2024 树（与 PMDG 777 / C919 同模式），兼容 iniBuilds 机型共用的 "iniBuilds DFD v2" 数据包名（[state.py](state.py)、[catalog.py](catalog.py)、[targets.py](targets.py)、[openlist.py](openlist.py)）。
+- **压缩包选包回退扫描期数根目录**：MSFS 子目录未匹配到压缩包时，自动回退扫描期数根目录（`/导航数据/{cycle}/`），支持 `iniBuilds DFD v2.zip` 等直接放在根目录的数据包；A380 选包硬规则优先匹配 `iniBuilds DFD v2`（[openlist.py](openlist.py) `download_openlist_archive_for_addon`、`select_openlist_archive_for_addon`）。
+- **OpenList 双源 + 自动故障切换**：新增主源 `https://pan.cnrpg.top`（HTTPS），备用源 `http://main.cnrpg.top:5245`。所有 OpenList 请求（登录 / 目录读取 / 文件信息）在当前源网络故障时自动切换到下一个源，并记住可用的源；token 按源缓存，切换后自动重新登录；非 JSON 错误响应（CDN/WAF 拦截页）同样触发切源（[openlist.py](openlist.py) `OPENLIST_BASE_URLS`、`_openlist_authed_post`）。
+- **下载阶段跨源续传**：压缩包下载过程中主源断开 / 5xx / 非 JSON 403 时，自动换备用源重新获取下载链接并继续，已下载的 `.part` 断点保留可续传（[openlist.py](openlist.py) `download_openlist_archive_for_addon`）。
+- **MSFS 子目录命名兼容**：服务端部分期数的 MSFS 子目录命名不统一（如 `MSFS DATA`），现在优先精确匹配 `msfs`，其次接受 `msfs` 开头的目录名，并用实际目录名构造下载路径（[openlist.py](openlist.py) `openlist_cycle_msfs_actual_path`）。
+- **OpenList 导航数据路径修正**：AList 服务端实际目录结构为 `/导航数据/{cycle}/MSFS`，此前代码从根路径 `/` 开始查找，导致读取目录时卡住。将 `OPENLIST_ROOT_PATH` 改为 `/导航数据`（[openlist.py](openlist.py)）。
+- **登录请求容错增强**：超时从 6s 提升至 12s，重试次数从 2 次增至 3 次，重试间隔从 0.6s 增至 0.8s，降低网络波动时的登录失败率。
+
+## 1.1.5 - 2026-07-10
+
+### 修复
+
+- **OpenList 导航数据路径修正**：AList 服务端实际目录结构为 `/导航数据/{cycle}/MSFS`，此前代码从根路径 `/` 开始查找，导致读取目录时卡住。将 `OPENLIST_ROOT_PATH` 改为 `/导航数据`，`openlist_cycle_path` / `openlist_cycle_msfs_path` 同步修正（[openlist.py:22](openlist.py#L22)）。
+
+### 优化
+
+- **登录请求容错增强**：超时从 6s 提升至 12s，重试次数从 2 次增至 3 次，重试间隔从 0.6s 增至 0.8s，降低网络波动时的登录失败率（[openlist.py:140](openlist.py#L140)）。
+
 ## 1.1.4 - 2026-06-29
 
 ### 客户端

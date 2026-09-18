@@ -160,7 +160,7 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
         return "c919" in hay
     if package == "ifly-aircraft-737max8" or "ifly" in name:
         return "ifly" in hay and ("737-max8" in hay or "737max8" in compact or "max8" in compact)
-    if package in {"inibuilds-aircraft-a340", "inibuilds-aircraft-a350"}:
+    if package in {"inibuilds-aircraft-a340", "inibuilds-aircraft-a350", "inibuilds-aircraft-a380"}:
         if "inibuilds" not in hay:
             return False
         if is_inibuilds_msfs2024_a340_addon(addon):
@@ -169,6 +169,8 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
             return _is_inibuilds_a340_text(hay, compact) and not _is_a346_text(hay, compact)
         if "dfd" in hay:
             return True
+        if package == "inibuilds-aircraft-a380" or "a380" in name:
+            return "a380" in hay or "380" in compact
         if package == "inibuilds-aircraft-a350" or "a350" in name:
             return "a350" in hay or "350" in compact
         if "a340-300" in name or "a343" in name:
@@ -293,6 +295,8 @@ def folder_name_matches_addon_signature(addon: Addon, candidate_dir: Path) -> bo
         return part_has("inibuilds") and part_has("a340")
     if package == "inibuilds-aircraft-a350":
         return part_has("inibuilds") and part_has("a350")
+    if package == "inibuilds-aircraft-a380":
+        return part_has("inibuilds") and part_has("a380")
     if package == "ifly-aircraft-737max8":
         return part_has("ifly") and (part_has("737max8") or part_has("max8") or part_has("b738m"))
     if package == "aerosoft-crj":

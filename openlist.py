@@ -11,18 +11,128 @@ from urllib.request import Request, urlopen
 from state import APP_NAME, APP_VERSION, Addon
 from targets import addon_search_tokens, infer_package_name
 
-BACKUP_POWER_SERVER_BASE = "http://fms.cnrpg.top:17306"
+BACKUP_POWER_SERVER_BASE = "http://main.cnrpg.top:17306"
 BACKUP_POWER_LOGIN_URL = f"{BACKUP_POWER_SERVER_BASE}/api/auth/login"
 BACKUP_POWER_NAVDATA_DOWNLOAD_URL = f"{BACKUP_POWER_SERVER_BASE}/api/navdata/download"
 BACKUP_POWER_ME_URL = f"{BACKUP_POWER_SERVER_BASE}/api/me"
-OPENLIST_BASE_URL = "http://main.cnrpg.top:5245"
-OPENLIST_LOGIN_URL = f"{OPENLIST_BASE_URL}/api/auth/login"
-OPENLIST_LIST_URL = f"{OPENLIST_BASE_URL}/api/fs/list"
-OPENLIST_GET_URL = f"{OPENLIST_BASE_URL}/api/fs/get"
-OPENLIST_ROOT_PATH = "/"
+
+# OpenList 双源：主源（HTTPS）优先，备用源在网络故障时自动接管。
+OPENLIST_BASE_URLS = (
+    "https://pan.cnrpg.top",
+    "http://main.cnrpg.top:5245",
+)
+OPENLIST_PRIMARY_BASE_URL = OPENLIST_BASE_URLS[0]
+OPENLIST_FALLBACK_BASE_URL = OPENLIST_BASE_URLS[-1]
+# 兼容旧引用：指向主源（实际请求走 openlist_active_base_url()）。
+OPENLIST_BASE_URL = OPENLIST_PRIMARY_BASE_URL
+OPENLIST_LOGIN_PATH = "/api/auth/login"
+OPENLIST_LIST_PATH = "/api/fs/list"
+OPENLIST_GET_PATH = "/api/fs/get"
+OPENLIST_LOGIN_URL = OPENLIST_PRIMARY_BASE_URL + OPENLIST_LOGIN_PATH
+OPENLIST_LIST_URL = OPENLIST_PRIMARY_BASE_URL + OPENLIST_LIST_PATH
+OPENLIST_GET_URL = OPENLIST_PRIMARY_BASE_URL + OPENLIST_GET_PATH
+OPENLIST_ROOT_PATH = "/导航数据"
 OPENLIST_USERNAME = "navdata"
 OPENLIST_PASSWORD = "navdata"
 OPENLIST_TOKEN_CACHE = ""
+_OPENLIST_TOKEN_BASE = ""
+_OPENLIST_ACTIVE_BASE_INDEX = 0
+
+_OPENLIST_API_HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "User-Agent": "FMS-Update-Manager-Flet",
+    "Connection": "close",
+}
+
+
+class _OpenListNetworkError(Exception):
+    """Connectivity-level failure (DNS / timeout / refused) — worth failing over."""
+
+
+class _OpenListHTTPError(Exception):
+    """Server answered with an HTTP error status; carries code and body."""
+
+    def __init__(self, code: int, raw: str):
+        super().__init__(f"HTTP {code}")
+        self.code = code
+        self.raw = raw
+
+
+def openlist_active_base_url() -> str:
+    """Current OpenList source that requests are being sent to."""
+    if 0 <= _OPENLIST_ACTIVE_BASE_INDEX < len(OPENLIST_BASE_URLS):
+        return OPENLIST_BASE_URLS[_OPENLIST_ACTIVE_BASE_INDEX]
+    return OPENLIST_PRIMARY_BASE_URL
+
+
+def _set_active_base(base_url: str) -> None:
+    global _OPENLIST_ACTIVE_BASE_INDEX
+    try:
+        _OPENLIST_ACTIVE_BASE_INDEX = OPENLIST_BASE_URLS.index(base_url)
+    except ValueError:
+        pass
+
+
+def openlist_ordered_base_urls() -> list[str]:
+    """Configured sources with the active one first, then the rest in order."""
+    bases = list(OPENLIST_BASE_URLS)
+    active = openlist_active_base_url()
+    if active in bases:
+        bases.remove(active)
+        bases.insert(0, active)
+    return bases
+
+
+def _openlist_post(
+    path: str,
+    payload: dict,
+    headers: dict,
+    timeout: float,
+    base_url: str,
+) -> tuple[str, int]:
+    """Single POST against one source; converts transport errors into
+    _OpenListNetworkError (failover-eligible) / _OpenListHTTPError (business)."""
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = Request(
+        base_url.rstrip("/") + path,
+        data=body,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return (
+                resp.read().decode("utf-8", errors="ignore"),
+                int(getattr(resp, "status", 200) or 200),
+            )
+    except HTTPError as exc:
+        try:
+            raw = exc.read().decode("utf-8", errors="ignore")
+        except Exception:
+            raw = ""
+        raise _OpenListHTTPError(int(getattr(exc, "code", 0) or 0), raw) from exc
+    except (URLError, OSError) as exc:
+        raise _OpenListNetworkError(str(exc)) from exc
+
+
+def _openlist_error_detail(raw: str, fallback: str = "") -> str:
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        text = str(data.get("message") or data.get("detail") or raw).strip()
+    else:
+        text = str(raw or "").strip()
+    return text or fallback
+
+
+def _openlist_body_is_json(raw: str) -> bool:
+    """OpenList always answers with JSON. Non-JSON bodies (Cloudflare/WAF
+    challenge pages, proxy errors) mean the source itself is not usable."""
+    text = str(raw or "").lstrip()
+    return text.startswith("{") or text.startswith("[")
 
 OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
     "fnx-aircraft-320": ("fenix",),
@@ -43,6 +153,7 @@ OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
     "ifly-aircraft-737max8": ("ifly", "max8"),
     "inibuilds-aircraft-a340": ("inibuilds",),
     "inibuilds-aircraft-a350": ("inibuilds",),
+    "inibuilds-aircraft-a380": ("a380",),
     "aerosoft-aircraft-a346-pro": ("toliss", "dfdv2", "as346", "a346", "aerosofta346", "aerosoft"),
     "navigraph-msfs2020-base": ("msfs2020",),
     "navigraph-msfs2024-base": ("msfs2024",),
@@ -137,7 +248,7 @@ def backup_power_login_request(api_url: str, username: str, password: str) -> di
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     raw = ""
     status = 0
-    for attempt in range(2):
+    for attempt in range(3):
         req = Request(
             api_url,
             data=body,
@@ -150,14 +261,14 @@ def backup_power_login_request(api_url: str, username: str, password: str) -> di
             method="POST",
         )
         try:
-            with _urlopen_with_retry(req, timeout=6) as resp:
+            with _urlopen_with_retry(req, timeout=12) as resp:
                 raw = resp.read().decode("utf-8", errors="ignore")
                 status = int(getattr(resp, "status", 200) or 200)
             break
         except HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="ignore")
-            if exc.code in {502, 503, 504} and attempt < 1:
-                time.sleep(0.6 * (attempt + 1))
+            if exc.code in {502, 503, 504} and attempt < 2:
+                time.sleep(0.8 * (attempt + 1))
                 continue
             try:
                 detail_payload = json.loads(raw)
@@ -171,8 +282,8 @@ def backup_power_login_request(api_url: str, username: str, password: str) -> di
                 raise ValueError(detail) from exc
             raise ValueError(detail or f"请求失败 ({exc.code})") from exc
         except URLError as exc:
-            if attempt < 1:
-                time.sleep(0.6 * (attempt + 1))
+            if attempt < 2:
+                time.sleep(0.8 * (attempt + 1))
                 continue
             if _is_winsock_access_error(exc):
                 raise ValueError("无法连接服务器：本机网络访问被系统或安全软件拦截（WinError 10013），请检查防火墙/代理设置后重试。") from exc
@@ -313,40 +424,22 @@ def backup_power_me_request(token: str) -> dict:
     }
 
 
-def openlist_login_request() -> str:
-    global OPENLIST_TOKEN_CACHE
+def _openlist_login_on(base_url: str) -> str:
+    """Login against one specific source. Raises _OpenListNetworkError when
+    that source is unreachable (caller may fail over) and ValueError for
+    business failures (credentials, server-side rejection)."""
     payload = {
         "username": OPENLIST_USERNAME,
         "password": OPENLIST_PASSWORD,
         "otp_code": "",
     }
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = Request(
-        OPENLIST_LOGIN_URL,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "FMS-Update-Manager-Flet",
-            "Connection": "close",
-        },
-        method="POST",
-    )
     try:
-        with urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
-            status = int(getattr(resp, "status", 200) or 200)
-    except HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="ignore")
-        try:
-            data = json.loads(raw)
-            detail = str(data.get("message") or data.get("detail") or raw).strip()
-        except Exception:
-            detail = raw.strip() or str(exc)
+        raw, status = _openlist_post(OPENLIST_LOGIN_PATH, payload, _OPENLIST_API_HEADERS, 10, base_url)
+    except _OpenListHTTPError as exc:
+        if not _openlist_body_is_json(exc.raw):
+            raise _OpenListNetworkError(f"{base_url} 返回非 JSON 响应 (HTTP {exc.code})") from exc
+        detail = _openlist_error_detail(exc.raw, str(exc))
         raise ValueError(f"OpenList 登录失败 ({exc.code}): {detail}") from exc
-    except URLError as exc:
-        raise ValueError(f"无法连接 OpenList: {exc}") from exc
-
     try:
         data = json.loads(raw) if raw.strip() else {}
     except Exception:
@@ -358,58 +451,100 @@ def openlist_login_request() -> str:
     token = str(data.get("token") or data.get("data", {}).get("token") or "").strip()
     if not token:
         raise ValueError("OpenList 登录成功但未返回 token。")
-    OPENLIST_TOKEN_CACHE = token
     return token
 
 
-def openlist_list_dir_request(token: str, folder_path: str = OPENLIST_ROOT_PATH) -> list[dict]:
-    path = str(folder_path or OPENLIST_ROOT_PATH).strip() or OPENLIST_ROOT_PATH
-    if not path.startswith("/"):
-        path = "/" + path
-    payload = {
-        "path": path,
-        "page": 1,
-        "per_page": 500,
-        "refresh": False,
-    }
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = Request(
-        OPENLIST_LIST_URL,
-        data=body,
-        headers={
-            "Authorization": token,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "FMS-Update-Manager-Flet",
-            "Connection": "close",
-        },
-        method="POST",
-    )
-    try:
-        with urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
-            status = int(getattr(resp, "status", 200) or 200)
-    except HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="ignore")
+def openlist_login_request() -> str:
+    """Login via the first reachable source (active source first). On success
+    that source becomes the active one and the token is cached for it."""
+    global OPENLIST_TOKEN_CACHE, _OPENLIST_TOKEN_BASE
+    last_network_error: Exception | None = None
+    for base in openlist_ordered_base_urls():
         try:
-            data = json.loads(raw)
-            detail = str(data.get("message") or data.get("detail") or raw).strip()
-        except Exception:
-            detail = raw.strip() or str(exc)
-        raise ValueError(f"OpenList 目录读取失败 ({exc.code}): {detail}") from exc
-    except URLError as exc:
-        raise ValueError(f"无法连接 OpenList: {exc}") from exc
+            token = _openlist_login_on(base)
+        except _OpenListNetworkError as exc:
+            last_network_error = exc
+            continue
+        _set_active_base(base)
+        OPENLIST_TOKEN_CACHE = token
+        _OPENLIST_TOKEN_BASE = base
+        return token
+    if last_network_error is not None and _is_winsock_access_error(last_network_error):
+        raise ValueError("无法连接 OpenList：本机网络访问被系统或安全软件拦截（WinError 10013），请检查防火墙/代理设置后重试。") from last_network_error
+    raise ValueError(f"无法连接 OpenList（主源与备用源均不可达）: {last_network_error}")
 
-    try:
-        data = json.loads(raw) if raw.strip() else {}
-    except Exception:
-        data = {"raw": raw}
-    if not isinstance(data, dict):
-        data = {"raw": raw}
-    if status >= 400 or int(data.get("code", 200) or 200) >= 400:
-        raise ValueError(str(data.get("message") or data.get("detail") or raw or "OpenList 目录读取失败"))
-    items = data.get("data", {}).get("content", [])
-    return items if isinstance(items, list) else []
+
+def _openlist_authed_post(path: str, payload: dict, timeout: float, what: str) -> tuple[str, int]:
+    """Authorized OpenList POST with automatic source failover.
+
+    - Connectivity failure on the current source: transparently retry on the
+      next configured source (and remember the working one).
+    - Token rejected: re-login once, then retry.
+    Business errors (non-token HTTP failures) raise ValueError as before.
+    """
+    global OPENLIST_TOKEN_CACHE, _OPENLIST_TOKEN_BASE
+    refreshed = False
+    while True:
+        last_network_error: Exception | None = None
+        refresh_requested = False
+        for base in openlist_ordered_base_urls():
+            token = OPENLIST_TOKEN_CACHE if _OPENLIST_TOKEN_BASE == base else ""
+            if not token:
+                try:
+                    token = _openlist_login_on(base)
+                except _OpenListNetworkError as exc:
+                    last_network_error = exc
+                    continue
+                OPENLIST_TOKEN_CACHE = token
+                _OPENLIST_TOKEN_BASE = base
+            try:
+                raw, status = _openlist_post(
+                    path, payload, {**_OPENLIST_API_HEADERS, "Authorization": token}, timeout, base
+                )
+            except _OpenListNetworkError as exc:
+                last_network_error = exc
+                continue
+            except _OpenListHTTPError as exc:
+                if not _openlist_body_is_json(exc.raw):
+                    last_network_error = exc
+                    continue
+                detail = _openlist_error_detail(exc.raw, str(exc))
+                if not refreshed and is_openlist_token_error(detail):
+                    refreshed = True
+                    OPENLIST_TOKEN_CACHE = ""
+                    _OPENLIST_TOKEN_BASE = ""
+                    refresh_requested = True  # restart with a fresh login
+                    break
+                _set_active_base(base)
+                raise ValueError(f"{what} ({exc.code}): {detail}") from exc
+            try:
+                body = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                body = {"raw": raw}
+            if not isinstance(body, dict):
+                body = {"raw": raw}
+            body_code = int(body.get("code", 200) or 200)
+            if status >= 400 or body_code >= 400:
+                detail = str(body.get("message") or body.get("detail") or raw).strip()
+                if not refreshed and is_openlist_token_error(detail):
+                    refreshed = True
+                    OPENLIST_TOKEN_CACHE = ""
+                    _OPENLIST_TOKEN_BASE = ""
+                    refresh_requested = True  # restart with a fresh login
+                    break
+                _set_active_base(base)
+                if status >= 400:
+                    raise ValueError(f"{what} ({status}): {detail or raw}") from None
+                raise ValueError(detail or f"{what} 失败") from None
+            _set_active_base(base)
+            OPENLIST_TOKEN_CACHE = token
+            _OPENLIST_TOKEN_BASE = base
+            return raw, status
+        if refresh_requested:
+            continue
+        if last_network_error is not None and _is_winsock_access_error(last_network_error):
+            raise ValueError("无法连接 OpenList：本机网络访问被系统或安全软件拦截（WinError 10013），请检查防火墙/代理设置后重试。") from last_network_error
+        raise ValueError(f"无法连接 OpenList（主源与备用源均不可达）: {last_network_error}")
 
 
 def is_openlist_token_error(exc: Exception | str) -> bool:
@@ -425,61 +560,84 @@ def is_openlist_token_error(exc: Exception | str) -> bool:
 
 
 def get_openlist_token(*, force_refresh: bool = False) -> str:
-    global OPENLIST_TOKEN_CACHE
-    if OPENLIST_TOKEN_CACHE and not force_refresh:
-        return OPENLIST_TOKEN_CACHE
-    OPENLIST_TOKEN_CACHE = openlist_login_request()
+    global OPENLIST_TOKEN_CACHE, _OPENLIST_TOKEN_BASE
+    if force_refresh:
+        OPENLIST_TOKEN_CACHE = ""
+        _OPENLIST_TOKEN_BASE = ""
+    if not OPENLIST_TOKEN_CACHE:
+        OPENLIST_TOKEN_CACHE = openlist_login_request()
+        _OPENLIST_TOKEN_BASE = openlist_active_base_url()
     return OPENLIST_TOKEN_CACHE
 
 
-def openlist_list_dir_auto_request(folder_path: str = OPENLIST_ROOT_PATH) -> list[dict]:
-    global OPENLIST_TOKEN_CACHE
-    token = get_openlist_token(force_refresh=False)
+def openlist_list_dir_request(token: str, folder_path: str = OPENLIST_ROOT_PATH) -> list[dict]:
+    """Compat wrapper: single-source directory listing against the active source."""
+    path = str(folder_path or OPENLIST_ROOT_PATH).strip() or OPENLIST_ROOT_PATH
+    if not path.startswith("/"):
+        path = "/" + path
+    payload = {
+        "path": path,
+        "page": 1,
+        "per_page": 500,
+        "refresh": False,
+    }
+    raw, status = _openlist_post(
+        OPENLIST_LIST_PATH,
+        payload,
+        {**_OPENLIST_API_HEADERS, "Authorization": token},
+        15,
+        openlist_active_base_url(),
+    )
     try:
-        return openlist_list_dir_request(token, folder_path)
-    except Exception as exc:
-        if not is_openlist_token_error(exc):
-            raise
-        OPENLIST_TOKEN_CACHE = ""
-        fresh_token = get_openlist_token(force_refresh=True)
-        return openlist_list_dir_request(fresh_token, folder_path)
+        data = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        data = {"raw": raw}
+    if not isinstance(data, dict):
+        data = {"raw": raw}
+    if status >= 400 or int(data.get("code", 200) or 200) >= 400:
+        raise ValueError(str(data.get("message") or data.get("detail") or raw or "OpenList 目录读取失败"))
+    items = data.get("data", {}).get("content", [])
+    return items if isinstance(items, list) else []
+
+
+def openlist_list_dir_auto_request(folder_path: str = OPENLIST_ROOT_PATH) -> list[dict]:
+    path = str(folder_path or OPENLIST_ROOT_PATH).strip() or OPENLIST_ROOT_PATH
+    if not path.startswith("/"):
+        path = "/" + path
+    payload = {
+        "path": path,
+        "page": 1,
+        "per_page": 500,
+        "refresh": False,
+    }
+    raw, status = _openlist_authed_post(OPENLIST_LIST_PATH, payload, 15, "OpenList 目录读取失败")
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        data = {"raw": raw}
+    if not isinstance(data, dict):
+        data = {"raw": raw}
+    if status >= 400 or int(data.get("code", 200) or 200) >= 400:
+        raise ValueError(str(data.get("message") or data.get("detail") or raw or "OpenList 目录读取失败"))
+    items = data.get("data", {}).get("content", [])
+    return items if isinstance(items, list) else []
 
 
 def openlist_get_file_meta_request(token: str, file_path: str) -> dict:
+    """Compat wrapper: single-source meta request against the active source."""
     path = str(file_path or "").strip()
     if not path:
         raise ValueError("OpenList 文件路径不能为空。")
     if not path.startswith("/"):
         path = "/" + path
     payload = {"path": path, "password": ""}
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = Request(
-        OPENLIST_GET_URL,
-        data=body,
-        headers={
-            "Authorization": token,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "FMS-Update-Manager-Flet",
-            "Connection": "close",
-        },
-        method="POST",
+    raw, status = _openlist_post(
+        OPENLIST_GET_PATH,
+        payload,
+        {**_OPENLIST_API_HEADERS, "Authorization": token},
+        15,
+        openlist_active_base_url(),
     )
-    try:
-        with urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
-            status = int(getattr(resp, "status", 200) or 200)
-    except HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="ignore")
-        try:
-            data = json.loads(raw)
-            detail = str(data.get("message") or data.get("detail") or raw).strip()
-        except Exception:
-            detail = raw.strip() or str(exc)
-        raise ValueError(f"OpenList 文件信息读取失败 ({exc.code}): {detail}") from exc
-    except URLError as exc:
-        raise ValueError(f"无法连接 OpenList: {exc}") from exc
-
     try:
         data = json.loads(raw) if raw.strip() else {}
     except Exception:
@@ -493,30 +651,37 @@ def openlist_get_file_meta_request(token: str, file_path: str) -> dict:
 
 
 def openlist_get_file_meta_auto_request(file_path: str) -> dict:
-    global OPENLIST_TOKEN_CACHE
-    token = get_openlist_token(force_refresh=False)
+    path = str(file_path or "").strip()
+    if not path:
+        raise ValueError("OpenList 文件路径不能为空。")
+    if not path.startswith("/"):
+        path = "/" + path
+    payload = {"path": path, "password": ""}
+    raw, status = _openlist_authed_post(OPENLIST_GET_PATH, payload, 15, "OpenList 文件信息读取失败")
     try:
-        return openlist_get_file_meta_request(token, file_path)
-    except Exception as exc:
-        if not is_openlist_token_error(exc):
-            raise
-        OPENLIST_TOKEN_CACHE = ""
-        fresh_token = get_openlist_token(force_refresh=True)
-        return openlist_get_file_meta_request(fresh_token, file_path)
+        data = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        data = {"raw": raw}
+    if not isinstance(data, dict):
+        data = {"raw": raw}
+    if status >= 400 or int(data.get("code", 200) or 200) >= 400:
+        raise ValueError(str(data.get("message") or data.get("detail") or raw or "OpenList 文件信息读取失败"))
+    payload_data = data.get("data", {})
+    return payload_data if isinstance(payload_data, dict) else {}
 
 
 def openlist_cycle_path(cycle_id: str) -> str:
     cycle_text = str(cycle_id or "").strip().strip("/")
     if not cycle_text:
         return OPENLIST_ROOT_PATH
-    return "/" + cycle_text
+    return OPENLIST_ROOT_PATH + "/" + cycle_text
 
 
 def openlist_cycle_msfs_path(cycle_id: str) -> str:
     cycle_text = str(cycle_id or "").strip().strip("/")
     if not cycle_text:
-        return "/MSFS"
-    return "/" + cycle_text + "/MSFS"
+        return OPENLIST_ROOT_PATH + "/MSFS"
+    return OPENLIST_ROOT_PATH + "/" + cycle_text + "/MSFS"
 
 
 def find_openlist_cycle_folder(cycle_id: str) -> dict | None:
@@ -540,12 +705,34 @@ def find_openlist_cycle_msfs_folder(cycle_id: str) -> dict | None:
     if not cycle_folder:
         return None
     items = openlist_list_dir_auto_request(openlist_cycle_path(cycle_text))
+    exact_match: dict | None = None
+    prefix_match: dict | None = None
     for item in items:
         if not isinstance(item, dict):
             continue
-        if bool(item.get("is_dir")) and str(item.get("name", "")).strip().lower() == "msfs":
-            return item
-    return None
+        if not bool(item.get("is_dir")):
+            continue
+        # 服务端上传命名不统一：规范名 msfs，历史出现过 "MSFS DATA" 等。
+        name_norm = str(item.get("name", "")).strip().lower()
+        if name_norm == "msfs":
+            exact_match = item
+            break
+        if name_norm.startswith("msfs") and prefix_match is None:
+            prefix_match = item
+    return exact_match if exact_match is not None else prefix_match
+
+
+def openlist_cycle_msfs_actual_path(cycle_id: str) -> str:
+    """Path of the cycle's MSFS folder using its real name on the server
+    (handles legacy naming like "MSFS DATA" instead of "msfs")."""
+    cycle_text = str(cycle_id or "").strip()
+    if not cycle_text:
+        raise ValueError("AIRAC 期数不能为空。")
+    folder = find_openlist_cycle_msfs_folder(cycle_text)
+    if folder is None:
+        raise ValueError(f"OpenList 未找到 MSFS 目录: 导航数据/{cycle_text}")
+    folder_name = str(folder.get("name", "")).strip() or "msfs"
+    return openlist_cycle_path(cycle_text).rstrip("/") + "/" + folder_name
 
 
 def list_openlist_cycle_msfs_items(cycle_id: str) -> list[dict]:
@@ -554,9 +741,7 @@ def list_openlist_cycle_msfs_items(cycle_id: str) -> list[dict]:
         raise ValueError("AIRAC 期数不能为空。")
     if not find_openlist_cycle_folder(cycle_text):
         raise ValueError(f"OpenList 未找到期数目录: {cycle_text}")
-    if not find_openlist_cycle_msfs_folder(cycle_text):
-        raise ValueError(f"OpenList 未找到 MSFS 目录: {cycle_text}/MSFS")
-    return openlist_list_dir_auto_request(openlist_cycle_msfs_path(cycle_text))
+    return openlist_list_dir_auto_request(openlist_cycle_msfs_actual_path(cycle_text))
 
 
 def _norm_token(text: str) -> str:
@@ -628,6 +813,9 @@ def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[d
         hard_rules = [("inibuilds", "a343"), ("inibuilds", "a340", "300"), ("inibuilds", "a340")]
     elif package in {"inibuilds-aircraft-a340", "inibuilds-aircraft-a350"}:
         hard_rules = [("inibuilds",)]
+    elif package == "inibuilds-aircraft-a380":
+        # A380 与 A340/A350 共用 iniBuilds 的 DFD v2 数据包（用户确认）
+        hard_rules = [("inibuilds", "dfdv2"), ("inibuilds", "dfd")]
     elif package == "aerosoft-aircraft-a346-pro":
         hard_rules = [
             ("toliss", "dfdv2"),
@@ -697,19 +885,28 @@ def download_openlist_archive_for_addon(
     progress_callback: Callable[[str], None] | None = None,
     expected_sha256: str = "",
 ) -> dict:
+    global OPENLIST_TOKEN_CACHE, _OPENLIST_TOKEN_BASE
     cycle_text = str(cycle_id or "").strip()
     if not cycle_text:
         raise ValueError("未指定 AIRAC 期数。")
     if progress_callback is not None:
-        progress_callback(f"正在读取 OpenList 目录: /{cycle_text}/MSFS")
+        progress_callback(f"正在读取 OpenList 目录: /导航数据/{cycle_text}/MSFS")
     items = list_openlist_cycle_msfs_items(cycle_text)
     chosen = select_openlist_archive_for_addon(addon, cycle_text, items)
+    remote_dir = openlist_cycle_msfs_actual_path(cycle_text).rstrip("/")
+    if chosen is None:
+        # 回退：部分压缩包（如 iniBuilds DFD v2）直接放在期数根目录
+        if progress_callback is not None:
+            progress_callback(f"MSFS 目录未找到匹配压缩包，尝试期数根目录: /导航数据/{cycle_text}")
+        root_items = openlist_list_dir_auto_request(openlist_cycle_path(cycle_text))
+        chosen = select_openlist_archive_for_addon(addon, cycle_text, root_items)
+        remote_dir = openlist_cycle_path(cycle_text).rstrip("/")
     if chosen is None:
         raise ValueError(f"未找到与机型匹配的 OpenList 压缩包: {addon.name} / {cycle_text}")
     file_name = str(chosen.get("name", "")).strip()
     if not file_name:
         raise ValueError("OpenList 返回的压缩包名称为空。")
-    remote_path = f"{openlist_cycle_msfs_path(cycle_text).rstrip('/')}/{file_name}"
+    remote_path = f"{remote_dir}/{file_name}"
     if progress_callback is not None:
         progress_callback(f"正在获取下载链接: {file_name}")
     meta = openlist_get_file_meta_auto_request(remote_path)
@@ -731,41 +928,72 @@ def download_openlist_archive_for_addon(
         else:
             progress_callback(f"正在下载: {file_name}")
 
-    headers = {
-        "Accept": "*/*",
-        "User-Agent": "FMS-Update-Manager-Flet",
-        "Connection": "close",
-    }
-    if resume_from > 0:
-        headers["Range"] = f"bytes={resume_from}-"
-
-    req = Request(raw_url, headers=headers, method="GET")
+    sources_tried: set[str] = set()
+    last_source_error: Exception | None = None
     total_size = 0
-    try:
-        with urlopen(req, timeout=60) as resp:
-            status_code = int(getattr(resp, "status", 200) or 200)
-            if resume_from > 0 and status_code != 206:
+    while True:
+        headers = {
+            "Accept": "*/*",
+            "User-Agent": "FMS-Update-Manager-Flet",
+            "Connection": "close",
+        }
+        if resume_from > 0:
+            headers["Range"] = f"bytes={resume_from}-"
+
+        try:
+            req = Request(raw_url, headers=headers, method="GET")
+            with urlopen(req, timeout=60) as resp:
+                status_code = int(getattr(resp, "status", 200) or 200)
+                if resume_from > 0 and status_code != 206:
+                    if progress_callback is not None:
+                        progress_callback(f"服务器未返回 206，放弃续传，从头下载: {file_name}")
+                    part_file.unlink(missing_ok=True)
+                    resume_from = 0
+                mode = "ab" if resume_from > 0 else "wb"
+                with part_file.open(mode) as fh:
+                    total_size = resume_from if resume_from > 0 else 0
+                    while True:
+                        chunk = resp.read(1024 * 256)
+                        if not chunk:
+                            break
+                        fh.write(chunk)
+                        total_size += len(chunk)
+            break
+        except HTTPError as exc:
+            if exc.code == 416 and resume_from > 0:
                 if progress_callback is not None:
-                    progress_callback(f"服务器未返回 206，放弃续传，从头下载: {file_name}")
+                    progress_callback(f"断点位置无效（416），从头下载: {file_name}")
                 part_file.unlink(missing_ok=True)
                 resume_from = 0
-            mode = "ab" if resume_from > 0 else "wb"
-            with part_file.open(mode) as fh:
-                if resume_from > 0:
-                    total_size = resume_from
-                while True:
-                    chunk = resp.read(1024 * 256)
-                    if not chunk:
-                        break
-                    fh.write(chunk)
-                    total_size += len(chunk)
-    except HTTPError as exc:
-        if exc.code == 416 and resume_from > 0:
-            if progress_callback is not None:
-                progress_callback(f"断点位置无效（416），从头下载: {file_name}")
-            part_file.unlink(missing_ok=True)
-            return download_openlist_archive_for_addon(addon, cycle_id, download_dir, progress_callback)
-        raise
+                continue
+            # 非 JSON 错误体（CDN/WAF 拦截页）视作源不可用，允许换源重试。
+            try:
+                err_body = exc.read(512).decode("utf-8", errors="ignore")
+            except Exception:
+                err_body = ""
+            failover_codes = {403, 500, 502, 503, 504}
+            if exc.code not in failover_codes or _openlist_body_is_json(err_body):
+                raise
+            last_source_error = exc
+        except (URLError, OSError) as exc:
+            last_source_error = exc
+
+        # 下载阶段故障切换：换下一个源重新获取下载链接后重试（保留 .part 续传）。
+        sources_tried.add(openlist_active_base_url())
+        alternate = next((b for b in OPENLIST_BASE_URLS if b not in sources_tried), "")
+        if not alternate:
+            raise ValueError(f"下载失败（主源与备用源均不可用）: {last_source_error}") from last_source_error
+        if progress_callback is not None:
+            progress_callback(f"当前源下载失败，切换备用源重试: {file_name}")
+        _set_active_base(alternate)
+        OPENLIST_TOKEN_CACHE = ""
+        _OPENLIST_TOKEN_BASE = ""
+        meta = openlist_get_file_meta_auto_request(remote_path)
+        new_url = str(meta.get("raw_url", "")).strip()
+        if not new_url:
+            raise ValueError(f"OpenList 备用源未返回可用下载链接: {file_name}")
+        raw_url = new_url
+        resume_from = part_file.stat().st_size if part_file.exists() and part_file.is_file() else 0
     if total_size <= 0:
         part_file.unlink(missing_ok=True)
         raise ValueError(f"下载失败或文件为空: {file_name}")

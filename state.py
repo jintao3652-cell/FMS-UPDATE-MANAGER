@@ -39,7 +39,7 @@ if PORTABLE_ROOT is not None:
     LOCAL_DIR = PORTABLE_ROOT / "local"
 STATE_FILE = ROAMING_DIR / "state.json"
 BACKUP_DIR = LOCAL_DIR / "backups"
-APP_VERSION = os.getenv("FMS_APP_VERSION", "1.1.4").strip() or "1.1.0"
+APP_VERSION = os.getenv("FMS_APP_VERSION", "1.1.6").strip() or "1.1.0"
 MSFS_VERSIONS = ["MSFS 2024", "MSFS 2020"]
 PLATFORMS = ["Xbox/MS Store", "Steam"]
 THEME_LIGHT = "Light Mode"
@@ -48,7 +48,7 @@ DEFAULT_BATCH_DOWNLOAD_WORKERS = 4
 DEFAULT_CACHE_CLEANUP_DAYS = 7
 CACHE_CLEANUP_DAY_OPTIONS = (1, 3, 7, 14, 30)
 BATCH_DOWNLOAD_WORKER_OPTIONS = (1, 2, 4, 8)
-BACKUP_POWER_LOGIN_URL = "http://fms.cnrpg.top:17306/api/auth/login"
+BACKUP_POWER_LOGIN_URL = "http://main.cnrpg.top:17306/api/auth/login"
 DEFAULT_SIM_PLATFORM_VARIANTS = [
     ("MSFS 2020", "Steam"),
     ("MSFS 2020", "Xbox/MS Store"),
@@ -145,6 +145,28 @@ def default_addons() -> list[dict]:
             "platform": "Steam",
             "target_path": "",
             "package_name": "inibuilds-aircraft-a340",
+            "navdata_subpath": r"work\NavigationData",
+        }
+    )
+    addons.append(
+        {
+            "name": "iniBuilds A380",
+            "description": "iniBuilds A380",
+            "simulator": "MSFS 2024",
+            "platform": "Steam",
+            "target_path": "",
+            "package_name": "inibuilds-aircraft-a380",
+            "navdata_subpath": r"work\NavigationData",
+        }
+    )
+    addons.append(
+        {
+            "name": "iniBuilds A380",
+            "description": "iniBuilds A380",
+            "simulator": "MSFS 2024",
+            "platform": "Xbox/MS Store",
+            "target_path": "",
+            "package_name": "inibuilds-aircraft-a380",
             "navdata_subpath": r"work\NavigationData",
         }
     )

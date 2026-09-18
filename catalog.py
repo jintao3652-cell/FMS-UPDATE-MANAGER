@@ -92,6 +92,7 @@ def fixed_relative_path(addon: Addon) -> str:
         "pmdg 777-300er": os.path.join("pmdg-aircraft-77w", "work", "NavigationData"),
         "tfdi md-11": os.path.join("tfdidesign-aircraft-md11", "work", "Nav-Primary"),
         "fycyc c919": os.path.join("fycyc-aircraft-c919x", "work", "NavigationData"),
+        "inibuilds a380": os.path.join("inibuilds-aircraft-a380", "work", "NavigationData"),
     }
     if name in fixed_paths:
         return fixed_paths[name]
@@ -106,6 +107,7 @@ def fixed_relative_path(addon: Addon) -> str:
         "pmdg-aircraft-77w",
         "tfdidesign-aircraft-md11",
         "fycyc-aircraft-c919x",
+        "inibuilds-aircraft-a380",
     }:
         package_fixed_paths = {
             "pmdg-aircraft-736": os.path.join("pmdg-aircraft-736", "Work"),
@@ -118,6 +120,7 @@ def fixed_relative_path(addon: Addon) -> str:
             "pmdg-aircraft-77w": os.path.join("pmdg-aircraft-77w", "work", "NavigationData"),
             "tfdidesign-aircraft-md11": os.path.join("tfdidesign-aircraft-md11", "work", "Nav-Primary"),
             "fycyc-aircraft-c919x": os.path.join("fycyc-aircraft-c919x", "work", "NavigationData"),
+            "inibuilds-aircraft-a380": os.path.join("inibuilds-aircraft-a380", "work", "NavigationData"),
         }
         return package_fixed_paths[package]
 
@@ -159,6 +162,11 @@ def fixed_relative_path(addon: Addon) -> str:
     # Aerosoft A340-600 Pro
     if package == "aerosoft-aircraft-a346-pro" or "a340-600" in name:
         return os.path.join("aerosoft-aircraft-a346-pro", "work", "FMSData")
+
+    # iniBuilds A380 (MSFS 2024 navdata lives under the aircraft's work folder,
+    # typically in the WASM\MSFS2024 tree, same as PMDG 777 / C919).
+    if package == "inibuilds-aircraft-a380" or "inibuilds a380" in name:
+        return os.path.join("inibuilds-aircraft-a380", "work", "NavigationData")
 
     # Just Flight RJ Professional
     if "rj professional" in name or package == "justflight-aircraft-rj":
