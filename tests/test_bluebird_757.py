@@ -167,6 +167,18 @@ class Bluebird757Tests(unittest.TestCase):
         self.assertIsNotNone(picked_shared)
         self.assertEqual(picked_shared["name"], "Bluebird_757-767_DFDv2_2611.zip")
 
+        # Regression: the server also hosts an unrelated QualityWings 757
+        # package. A bare "757" hint used to select it for Bluebird installs.
+        unrelated = [
+            {"name": "qualitywings-b757-bae146-avrorj-2612-r1.zip", "is_dir": False},
+            {"name": "msfs2020-2612-r1.7z", "is_dir": False},
+        ]
+        self.assertIsNone(
+            openlist.select_openlist_archive_for_addon(
+                _bluebird_addon(), "2612", unrelated
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

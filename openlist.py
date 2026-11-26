@@ -154,7 +154,7 @@ OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
     "inibuilds-aircraft-a340": ("inibuilds",),
     "inibuilds-aircraft-a350": ("inibuilds",),
     "inibuilds-aircraft-a380": ("a380",),
-    "bluebirdsim-aircraft-757-200": ("bluebird", "757", "767"),
+    "bluebirdsim-aircraft-757-200": ("bluebird",),
     "aerosoft-aircraft-a346-pro": ("toliss", "dfdv2", "as346", "a346", "aerosofta346", "aerosoft"),
     "navigraph-msfs2020-base": ("msfs2020",),
     "navigraph-msfs2024-base": ("msfs2024",),

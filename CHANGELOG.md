@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.1.7 - 2026-11-26
 
 ### 客户端
 
-- **新增 Bluebird B757-200 机型支持**：MSFS 2020 / 2024（Steam / Xbox）列表新增 "Bluebird B757-200"，导航数据目标为 `bluebirdsim-aircraft-757-200\work\NavigationData`；同时覆盖 MSFS 2024 的 `WASM\MSFS2024` 树与 MSFS 2020 的 `LocalState\packages` 树。cycle.json 名称 `Bluebird 757/767` 及 757/767 共用数据包均可识别，OpenList 选包优先匹配 `Bluebird` + `757`/`767` 压缩包（[state.py](state.py)、[catalog.py](catalog.py)、[targets.py](targets.py)、[openlist.py](openlist.py)）。
+- **新增 Bluebird B757-200 机型支持**：MSFS 2020 / 2024（Steam / Xbox）列表新增 "Bluebird B757-200"，导航数据目标为 `bluebirdsim-aircraft-757-200\work\NavigationData`；同时覆盖 MSFS 2024 的 `WASM\MSFS2024` 树与 MSFS 2020 的 `LocalState\packages` 树。cycle.json 名称 `Bluebird 757/767` 及 757/767 共用数据包均可识别（[state.py](state.py)、[catalog.py](catalog.py)、[targets.py](targets.py)）。
+- **收紧 Bluebird 下载选包规则**：压缩包必须带 `bluebird` 标识，避免把其他厂商的 757 数据包（如 `qualitywings-b757-bae146-avrorj`）误装进 Bluebird 机队。服务端未提供对应数据包时不执行安装（[openlist.py](openlist.py)）。
+- **新增 Bluebird 回归测试**：覆盖默认机型、固定路径、cycle 名/目录匹配、WASM2024 与本地 packages 双目录识别，以及拒绝误选 QualityWings 757（[tests/test_bluebird_757.py](tests/test_bluebird_757.py)）。
 
 ## 1.1.6 - 2026-09-18
 

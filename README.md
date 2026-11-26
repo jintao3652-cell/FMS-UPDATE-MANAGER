@@ -1,6 +1,6 @@
 ﻿# FMS UPDATE MANAGER
 
-> 当前版本：**v1.0.8**（2026-05-25）。完整变更请参考 [CHANGELOG.md](CHANGELOG.md)。
+> 当前版本：**v1.1.7**（2026-11-26）。完整变更请参考 [CHANGELOG.md](CHANGELOG.md)。
 
 FMS UPDATE MANAGER 是一个面向 Microsoft Flight Simulator 的 AIRAC 数据更新工具，主要用于批量管理机型导航数据库（cycle.json）并执行一键更新。
 
