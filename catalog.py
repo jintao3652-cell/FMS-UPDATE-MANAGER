@@ -93,6 +93,7 @@ def fixed_relative_path(addon: Addon) -> str:
         "tfdi md-11": os.path.join("tfdidesign-aircraft-md11", "work", "Nav-Primary"),
         "fycyc c919": os.path.join("fycyc-aircraft-c919x", "work", "NavigationData"),
         "inibuilds a380": os.path.join("inibuilds-aircraft-a380", "work", "NavigationData"),
+        "bluebird b757-200": os.path.join("bluebirdsim-aircraft-757-200", "work", "NavigationData"),
     }
     if name in fixed_paths:
         return fixed_paths[name]
@@ -108,6 +109,7 @@ def fixed_relative_path(addon: Addon) -> str:
         "tfdidesign-aircraft-md11",
         "fycyc-aircraft-c919x",
         "inibuilds-aircraft-a380",
+        "bluebirdsim-aircraft-757-200",
     }:
         package_fixed_paths = {
             "pmdg-aircraft-736": os.path.join("pmdg-aircraft-736", "Work"),
@@ -121,6 +123,7 @@ def fixed_relative_path(addon: Addon) -> str:
             "tfdidesign-aircraft-md11": os.path.join("tfdidesign-aircraft-md11", "work", "Nav-Primary"),
             "fycyc-aircraft-c919x": os.path.join("fycyc-aircraft-c919x", "work", "NavigationData"),
             "inibuilds-aircraft-a380": os.path.join("inibuilds-aircraft-a380", "work", "NavigationData"),
+            "bluebirdsim-aircraft-757-200": os.path.join("bluebirdsim-aircraft-757-200", "work", "NavigationData"),
         }
         return package_fixed_paths[package]
 
@@ -167,6 +170,11 @@ def fixed_relative_path(addon: Addon) -> str:
     # typically in the WASM\MSFS2024 tree, same as PMDG 777 / C919).
     if package == "inibuilds-aircraft-a380" or "inibuilds a380" in name:
         return os.path.join("inibuilds-aircraft-a380", "work", "NavigationData")
+
+    # Bluebird B757-200: navdata lives under work\NavigationData in both the
+    # MSFS 2024 WASM tree and the MSFS 2020 local packages tree.
+    if package == "bluebirdsim-aircraft-757-200" or ("bluebird" in name and ("757" in name or "b757" in name)):
+        return os.path.join("bluebirdsim-aircraft-757-200", "work", "NavigationData")
 
     # Just Flight RJ Professional
     if "rj professional" in name or package == "justflight-aircraft-rj":

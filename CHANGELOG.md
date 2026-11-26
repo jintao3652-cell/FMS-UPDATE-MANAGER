@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 客户端
+
+- **新增 Bluebird B757-200 机型支持**：MSFS 2020 / 2024（Steam / Xbox）列表新增 "Bluebird B757-200"，导航数据目标为 `bluebirdsim-aircraft-757-200\work\NavigationData`；同时覆盖 MSFS 2024 的 `WASM\MSFS2024` 树与 MSFS 2020 的 `LocalState\packages` 树。cycle.json 名称 `Bluebird 757/767` 及 757/767 共用数据包均可识别，OpenList 选包优先匹配 `Bluebird` + `757`/`767` 压缩包（[state.py](state.py)、[catalog.py](catalog.py)、[targets.py](targets.py)、[openlist.py](openlist.py)）。
+
 ## 1.1.6 - 2026-09-18
 
 ### 客户端

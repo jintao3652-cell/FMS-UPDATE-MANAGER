@@ -54,6 +54,9 @@ def addon_search_tokens(addon: Addon) -> list[str]:
         tokens.extend(["738", "737"])
     elif "pmdg 737-900" in name:
         tokens.extend(["739", "737"])
+    elif is_bluebird_757_addon(addon):
+        # cycle.json name is "Bluebird 757/767"; keep both variants searchable.
+        tokens.extend(["bluebird", "757", "b757", "767"])
     elif "a340-300" in name or "a343" in name:
         tokens.extend(["a343", "343", "a340-300"])
     elif "a340-600" in name or "a346" in name:
@@ -77,6 +80,14 @@ def is_ifly_737max8_addon(addon: Addon) -> bool:
 
 def is_inibuilds_msfs2024_a340_addon(addon: Addon) -> bool:
     return addon.simulator == "MSFS 2024" and addon.package_name.strip().lower() == "inibuilds-aircraft-a340"
+
+
+def is_bluebird_757_addon(addon: Addon) -> bool:
+    package = addon.package_name.strip().lower()
+    name = addon.name.strip().lower()
+    return package == "bluebirdsim-aircraft-757-200" or (
+        "bluebird" in name and ("757" in name or "b757" in name)
+    )
 
 
 def _is_a343_text(hay: str, compact: str) -> bool:
@@ -110,6 +121,11 @@ def cycle_name_matches_addon(addon: Addon, cycle_name: str) -> bool:
 
     if not hay:
         return False
+
+    if is_bluebird_757_addon(addon):
+        if "bluebird" not in hay:
+            return False
+        return "757" in compact or "767" in compact
 
     if is_ifly_737max8_addon(addon):
         return "ifly" in hay and ("737-max8" in hay or "737max8" in compact or "max8" in compact)
@@ -196,6 +212,11 @@ def cycle_name_is_generic_for_addon(addon: Addon, cycle_name: str) -> bool:
     if not hay:
         return False
 
+    if is_bluebird_757_addon(addon):
+        if "bluebird" not in hay:
+            return False
+        return not any(token in compact for token in ("757", "767", "b757", "757200"))
+
     if is_ifly_737max8_addon(addon):
         if "ifly" not in hay:
             return False
@@ -270,6 +291,13 @@ def folder_name_matches_addon_signature(addon: Addon, candidate_dir: Path) -> bo
         if package == "pmdg-aircraft-739":
             return part_has("739") or part_has("737900")
         return part_has("pmdg") and any(part_has(token) for token in ("736", "737", "738", "739"))
+
+    # Bluebird 757/767 navdata installs as bluebirdsim-aircraft-757-200 in
+    # both WASM and Community/local packages trees.
+    if package == "bluebirdsim-aircraft-757-200":
+        return part_has("bluebird") and (
+            part_has("757") or part_has("b757") or part_has("767")
+        )
 
     # Package-root validation for the rest of the catalog.
     if package == "inibuilds-aircraft-a340" and is_inibuilds_msfs2024_a340_addon(addon):

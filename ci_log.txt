@@ -1,0 +1,323 @@
+﻿2026-09-18T13:39:09.7765345Z Current runner version: '2.337.0'
+2026-09-18T13:39:09.7803549Z ##[group]Runner Image Provisioner
+2026-09-18T13:39:09.7804889Z Hosted Compute Agent
+2026-09-18T13:39:09.7805714Z Version: 20260828.587
+2026-09-18T13:39:09.7806608Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-18T13:39:09.7807858Z Build Date: 2026-08-28T16:44:25Z
+2026-09-18T13:39:09.7808946Z Worker ID: {81aaa1ac-3890-43b1-b574-c895e2832ac2}
+2026-09-18T13:39:09.7809973Z Azure Region: eastus2
+2026-09-18T13:39:09.7810814Z ##[endgroup]
+2026-09-18T13:39:09.7812699Z ##[group]Operating System
+2026-09-18T13:39:09.7813392Z Microsoft Windows Server 2025
+2026-09-18T13:39:09.7814014Z 10.0.26100
+2026-09-18T13:39:09.7814522Z Datacenter
+2026-09-18T13:39:09.7815031Z ##[endgroup]
+2026-09-18T13:39:09.7815562Z ##[group]Runner Image
+2026-09-18T13:39:09.7816180Z Image: windows-2025-vs2026
+2026-09-18T13:39:09.7816785Z Version: 20260907.229.1
+2026-09-18T13:39:09.7818466Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20260907.229/images/windows/Windows2025-VS2026-Readme.md
+2026-09-18T13:39:09.7820225Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20260907.229
+2026-09-18T13:39:09.7821211Z ##[endgroup]
+2026-09-18T13:39:09.7822289Z ##[group]GITHUB_TOKEN Permissions
+2026-09-18T13:39:09.7824566Z Contents: write
+2026-09-18T13:39:09.7825153Z Metadata: read
+2026-09-18T13:39:09.7825687Z ##[endgroup]
+2026-09-18T13:39:09.7827754Z Secret source: Actions
+2026-09-18T13:39:09.7828646Z Cache mode: write
+2026-09-18T13:39:09.7829336Z Prepare workflow directory
+2026-09-18T13:39:09.8161811Z Prepare all required actions
+2026-09-18T13:39:09.8211723Z Getting action download info
+2026-09-18T13:39:09.9905011Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-09-18T13:39:10.1341096Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-09-18T13:39:10.2828502Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-09-18T13:39:10.6126976Z Complete job name: Build on Windows
+2026-09-18T13:39:10.7588905Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-18T13:39:10.7598429Z ##[group]Run actions/checkout@v4
+2026-09-18T13:39:10.7599103Z with:
+2026-09-18T13:39:10.7599572Z   repository: jintao3652-cell/FMS-UPDATE-MANAGER
+2026-09-18T13:39:10.7603778Z   token: ***
+2026-09-18T13:39:10.7604174Z   ssh-strict: true
+2026-09-18T13:39:10.7604577Z   ssh-user: git
+2026-09-18T13:39:10.7604973Z   persist-credentials: true
+2026-09-18T13:39:10.7605412Z   clean: true
+2026-09-18T13:39:10.7605810Z   sparse-checkout-cone-mode: true
+2026-09-18T13:39:10.7606286Z   fetch-depth: 1
+2026-09-18T13:39:10.7606702Z   fetch-tags: false
+2026-09-18T13:39:10.7607090Z   show-progress: true
+2026-09-18T13:39:10.7607483Z   lfs: false
+2026-09-18T13:39:10.7607885Z   submodules: false
+2026-09-18T13:39:10.7608281Z   set-safe-directory: true
+2026-09-18T13:39:10.7608738Z   allow-unsafe-pr-checkout: false
+2026-09-18T13:39:10.7609411Z ##[endgroup]
+2026-09-18T13:39:10.9239473Z Syncing repository: jintao3652-cell/FMS-UPDATE-MANAGER
+2026-09-18T13:39:10.9241231Z ##[group]Getting Git version info
+2026-09-18T13:39:10.9241928Z Working directory is 'D:\a\FMS-UPDATE-MANAGER\FMS-UPDATE-MANAGER'
+2026-09-18T13:39:10.9967103Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-18T13:39:11.4035009Z git version 2.55.0.windows.5
+2026-09-18T13:39:11.4089366Z ##[endgroup]
+2026-09-18T13:39:11.4111518Z Temporarily overriding HOME='D:\a\_temp\63647121-6ef8-4f13-b4d0-ac898e0a222a' before making global git config changes
+2026-09-18T13:39:11.4114193Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-18T13:39:11.4126340Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\FMS-UPDATE-MANAGER\FMS-UPDATE-MANAGER
+2026-09-18T13:39:11.4845704Z Deleting the contents of 'D:\a\FMS-UPDATE-MANAGER\FMS-UPDATE-MANAGER'
+2026-09-18T13:39:11.4851831Z ##[group]Initializing the repository
+2026-09-18T13:39:11.4861689Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\FMS-UPDATE-MANAGER\FMS-UPDATE-MANAGER
+2026-09-18T13:39:11.5682920Z Initialized empty Git repository in D:/a/FMS-UPDATE-MANAGER/FMS-UPDATE-MANAGER/.git/
+2026-09-18T13:39:11.5728227Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/jintao3652-cell/FMS-UPDATE-MANAGER
+2026-09-18T13:39:11.6414579Z ##[endgroup]
+2026-09-18T13:39:11.6415781Z ##[group]Disabling automatic garbage collection
+2026-09-18T13:39:11.6423183Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-09-18T13:39:11.6720366Z ##[endgroup]
+2026-09-18T13:39:11.6721791Z ##[group]Setting up auth
+2026-09-18T13:39:11.6733280Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-18T13:39:11.7032400Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-18T13:39:13.3292321Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-18T13:39:13.3589584Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-18T13:39:13.8986484Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-18T13:39:13.9319844Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-18T13:39:14.4871593Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-09-18T13:39:14.5175302Z ##[endgroup]
+2026-09-18T13:39:14.5175822Z ##[group]Fetching the repository
+2026-09-18T13:39:14.5193688Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +c6ac72e2c4ceda37e0be5ffd7ce13375aca2b3a9:refs/remotes/origin/main
+2026-09-18T13:39:15.9108557Z From https://github.com/jintao3652-cell/FMS-UPDATE-MANAGER
+2026-09-18T13:39:15.9109579Z  * [new ref]         c6ac72e2c4ceda37e0be5ffd7ce13375aca2b3a9 -> origin/main
+2026-09-18T13:39:15.9147795Z ##[endgroup]
+2026-09-18T13:39:15.9148341Z ##[group]Determining the checkout info
+2026-09-18T13:39:15.9150850Z ##[endgroup]
+2026-09-18T13:39:15.9160047Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-09-18T13:39:15.9656183Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-09-18T13:39:15.9971158Z ##[group]Checking out the ref
+2026-09-18T13:39:15.9981904Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B main refs/remotes/origin/main
+2026-09-18T13:39:16.1293672Z Switched to a new branch 'main'
+2026-09-18T13:39:16.1458101Z branch 'main' set up to track 'origin/main'.
+2026-09-18T13:39:16.1507104Z ##[endgroup]
+2026-09-18T13:39:16.1873420Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-09-18T13:39:16.2135519Z c6ac72e2c4ceda37e0be5ffd7ce13375aca2b3a9
+2026-09-18T13:39:16.2673156Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-18T13:39:16.2676164Z ##[group]Run actions/setup-python@v5
+2026-09-18T13:39:16.2676438Z with:
+2026-09-18T13:39:16.2676840Z   python-version: 3.12
+2026-09-18T13:39:16.2677047Z   cache: pip
+2026-09-18T13:39:16.2677232Z   check-latest: false
+2026-09-18T13:39:16.2679615Z   token: ***
+2026-09-18T13:39:16.2679826Z   update-environment: true
+2026-09-18T13:39:16.2680064Z   allow-prereleases: false
+2026-09-18T13:39:16.2680282Z   freethreaded: false
+2026-09-18T13:39:16.2680499Z ##[endgroup]
+2026-09-18T13:39:16.4354295Z ##[group]Installed versions
+2026-09-18T13:39:16.4685116Z (node:3076) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-18T13:39:16.4685836Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-18T13:39:16.4686443Z Successfully set up CPython (3.12.10)
+2026-09-18T13:39:16.4687074Z ##[endgroup]
+2026-09-18T13:39:19.9497017Z pip cache is not found
+2026-09-18T13:39:19.9814749Z ##[group]Run python -m pip install --upgrade pip
+2026-09-18T13:39:19.9815298Z [36;1mpython -m pip install --upgrade pip[0m
+2026-09-18T13:39:19.9815630Z [36;1mpip install -r requirements.txt[0m
+2026-09-18T13:39:19.9815914Z [36;1mpip install pyinstaller[0m
+2026-09-18T13:39:19.9836653Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-09-18T13:39:19.9837106Z env:
+2026-09-18T13:39:19.9837396Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:19.9837890Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-09-18T13:39:19.9838328Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:19.9838717Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:19.9839097Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:19.9839400Z ##[endgroup]
+2026-09-18T13:39:22.2648465Z Requirement already satisfied: pip in C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages (26.2.1)
+2026-09-18T13:39:24.4998586Z Collecting flet==0.85.1 (from -r requirements.txt (line 1))
+2026-09-18T13:39:24.7134588Z   Downloading flet-0.85.1-py3-none-any.whl.metadata (6.9 kB)
+2026-09-18T13:39:24.8374133Z Collecting psutil>=5.9 (from -r requirements.txt (line 2))
+2026-09-18T13:39:24.8469520Z   Downloading psutil-7.2.2-cp37-abi3-win_amd64.whl.metadata (22 kB)
+2026-09-18T13:39:24.9347731Z Collecting SimConnect>=0.4.26 (from -r requirements.txt (line 3))
+2026-09-18T13:39:24.9455933Z   Downloading SimConnect-0.4.26-py2.py3-none-any.whl.metadata (7.4 kB)
+2026-09-18T13:39:25.0197424Z Collecting oauthlib>=3.2.2 (from flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.0280189Z   Downloading oauthlib-3.3.1-py3-none-any.whl.metadata (7.9 kB)
+2026-09-18T13:39:25.0910518Z Collecting httpx>=0.28.1 (from flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.1006658Z   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+2026-09-18T13:39:25.1601092Z Collecting repath>=0.9.0 (from flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.1684741Z   Downloading repath-0.9.0-py3-none-any.whl.metadata (899 bytes)
+2026-09-18T13:39:25.2964823Z Collecting msgpack>=1.1.0 (from flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.3051142Z   Downloading msgpack-1.2.2-cp312-cp312-win_amd64.whl.metadata (8.5 kB)
+2026-09-18T13:39:25.3726775Z Collecting anyio (from httpx>=0.28.1->flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.3813146Z   Downloading anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+2026-09-18T13:39:25.4392900Z Collecting certifi (from httpx>=0.28.1->flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.4478962Z   Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+2026-09-18T13:39:25.4935804Z Collecting httpcore==1.* (from httpx>=0.28.1->flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.5032430Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+2026-09-18T13:39:25.5534603Z Collecting idna (from httpx>=0.28.1->flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.5619982Z   Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+2026-09-18T13:39:25.6230267Z Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.28.1->flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.6314807Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-09-18T13:39:25.6938645Z Collecting six>=1.9.0 (from repath>=0.9.0->flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.7028628Z   Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+2026-09-18T13:39:25.7791013Z Collecting typing_extensions>=4.16.0 (from anyio->httpx>=0.28.1->flet==0.85.1->-r requirements.txt (line 1))
+2026-09-18T13:39:25.7897996Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-09-18T13:39:25.8198820Z Downloading flet-0.85.1-py3-none-any.whl (579 kB)
+2026-09-18T13:39:25.8757726Z    ---------------------------------------- 579.8/579.8 kB 6.9 MB/s  0:00:00
+2026-09-18T13:39:25.8842731Z Downloading psutil-7.2.2-cp37-abi3-win_amd64.whl (137 kB)
+2026-09-18T13:39:25.9241387Z Downloading SimConnect-0.4.26-py2.py3-none-any.whl (96 kB)
+2026-09-18T13:39:25.9455251Z Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-09-18T13:39:25.9691758Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-09-18T13:39:25.9996379Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+2026-09-18T13:39:26.0235707Z Downloading msgpack-1.2.2-cp312-cp312-win_amd64.whl (72 kB)
+2026-09-18T13:39:26.0524220Z Downloading oauthlib-3.3.1-py3-none-any.whl (160 kB)
+2026-09-18T13:39:26.0845622Z Downloading repath-0.9.0-py3-none-any.whl (4.7 kB)
+2026-09-18T13:39:26.1075715Z Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+2026-09-18T13:39:26.1320816Z Downloading anyio-4.15.1-py3-none-any.whl (132 kB)
+2026-09-18T13:39:26.1596820Z Downloading idna-3.20-py3-none-any.whl (69 kB)
+2026-09-18T13:39:26.1872338Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-09-18T13:39:26.2124421Z Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+2026-09-18T13:39:26.3845957Z Installing collected packages: typing_extensions, six, SimConnect, psutil, oauthlib, msgpack, idna, h11, certifi, repath, httpcore, anyio, httpx, flet
+2026-09-18T13:39:28.8526016Z 
+2026-09-18T13:39:28.8551689Z Successfully installed SimConnect-0.4.26 anyio-4.15.1 certifi-2026.7.22 flet-0.85.1 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.20 msgpack-1.2.2 oauthlib-3.3.1 psutil-7.2.2 repath-0.9.0 six-1.17.0 typing_extensions-4.16.0
+2026-09-18T13:39:30.4609549Z Collecting pyinstaller
+2026-09-18T13:39:30.6796543Z   Downloading pyinstaller-6.22.3-py3-none-win_amd64.whl.metadata (8.5 kB)
+2026-09-18T13:39:30.7844849Z Collecting altgraph (from pyinstaller)
+2026-09-18T13:39:30.7945109Z   Downloading altgraph-0.17.5-py2.py3-none-any.whl.metadata (7.5 kB)
+2026-09-18T13:39:30.8422501Z Requirement already satisfied: packaging>=22.0 in C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages (from pyinstaller) (26.3)
+2026-09-18T13:39:30.8881981Z Collecting pefile>=2022.5.30 (from pyinstaller)
+2026-09-18T13:39:30.8972143Z   Downloading pefile-2024.8.26-py3-none-any.whl.metadata (1.4 kB)
+2026-09-18T13:39:30.9824222Z Collecting pyinstaller-hooks-contrib>=2026.7 (from pyinstaller)
+2026-09-18T13:39:30.9917974Z   Downloading pyinstaller_hooks_contrib-2026.7-py3-none-any.whl.metadata (16 kB)
+2026-09-18T13:39:31.0589074Z Collecting pywin32-ctypes>=0.2.1 (from pyinstaller)
+2026-09-18T13:39:31.0678684Z   Downloading pywin32_ctypes-0.2.3-py3-none-any.whl.metadata (3.9 kB)
+2026-09-18T13:39:31.2182712Z Collecting setuptools>=42.0.0 (from pyinstaller)
+2026-09-18T13:39:31.2277397Z   Downloading setuptools-84.0.0-py3-none-any.whl.metadata (6.6 kB)
+2026-09-18T13:39:31.2711785Z Downloading pyinstaller-6.22.3-py3-none-win_amd64.whl (1.5 MB)
+2026-09-18T13:39:31.4094324Z    ---------------------------------------- 1.5/1.5 MB 10.8 MB/s  0:00:00
+2026-09-18T13:39:31.4184316Z Downloading pefile-2024.8.26-py3-none-any.whl (74 kB)
+2026-09-18T13:39:31.4526794Z Downloading pyinstaller_hooks_contrib-2026.7-py3-none-any.whl (459 kB)
+2026-09-18T13:39:31.4978638Z Downloading pywin32_ctypes-0.2.3-py3-none-any.whl (30 kB)
+2026-09-18T13:39:31.5247852Z Downloading setuptools-84.0.0-py3-none-any.whl (818 kB)
+2026-09-18T13:39:31.5750136Z    ---------------------------------------- 818.2/818.2 kB 11.8 MB/s  0:00:00
+2026-09-18T13:39:31.5834556Z Downloading altgraph-0.17.5-py2.py3-none-any.whl (21 kB)
+2026-09-18T13:39:31.7005730Z Installing collected packages: altgraph, setuptools, pywin32-ctypes, pyinstaller-hooks-contrib, pefile, pyinstaller
+2026-09-18T13:39:41.5733802Z 
+2026-09-18T13:39:41.5764023Z Successfully installed altgraph-0.17.5 pefile-2024.8.26 pyinstaller-6.22.3 pyinstaller-hooks-contrib-2026.7 pywin32-ctypes-0.2.3 setuptools-84.0.0
+2026-09-18T13:39:41.6773052Z ##[group]Run VER=$(python - <<'PY'
+2026-09-18T13:39:41.6773471Z [36;1mVER=$(python - <<'PY'[0m
+2026-09-18T13:39:41.6773745Z [36;1mimport re, io, os, sys[0m
+2026-09-18T13:39:41.6774093Z [36;1minp = (os.environ.get("INPUT_VER") or "").strip()[0m
+2026-09-18T13:39:41.6774400Z [36;1mif inp:[0m
+2026-09-18T13:39:41.6774587Z [36;1m    print(inp)[0m
+2026-09-18T13:39:41.6774796Z [36;1m    sys.exit(0)[0m
+2026-09-18T13:39:41.6775061Z [36;1ms = io.open("state.py", encoding="utf-8").read()[0m
+2026-09-18T13:39:41.6775493Z [36;1mm = re.search(r'APP_VERSION\s*=\s*os\.getenv\([^,]+,\s*["\']([0-9][^"\']*)["\']', s)[0m
+2026-09-18T13:39:41.6775910Z [36;1mbase = m.group(1) if m else "1.1.0"[0m
+2026-09-18T13:39:41.6776213Z [36;1mparts = (base.split(".") + ["0", "0", "0"])[:3][0m
+2026-09-18T13:39:41.6776487Z [36;1mtry:[0m
+2026-09-18T13:39:41.6776693Z [36;1m    a, b, c = (int(p) for p in parts)[0m
+2026-09-18T13:39:41.6776965Z [36;1mexcept ValueError:[0m
+2026-09-18T13:39:41.6777215Z [36;1m    a, b, c = 1, 1, 0[0m
+2026-09-18T13:39:41.6777453Z [36;1m# 把基准当成「满10进位的三位计数」的数值（每段0-9）[0m
+2026-09-18T13:39:41.6777724Z [36;1mbase_n = a * 100 + b * 10 + c[0m
+2026-09-18T13:39:41.6778019Z [36;1moffset = int(os.environ.get("RUN_NUMBER", "1")) - 1[0m
+2026-09-18T13:39:41.6778330Z [36;1mn = base_n + offset[0m
+2026-09-18T13:39:41.6778536Z [36;1mif n > 999:[0m
+2026-09-18T13:39:41.6779121Z [36;1m    print("::error::Version exceeds max 9.9.9 (base %s + offset %d). "[0m
+2026-09-18T13:39:41.6779566Z [36;1m          "Lower or reset APP_VERSION in state.py." % (base, offset),[0m
+2026-09-18T13:39:41.6779903Z [36;1m          file=sys.stderr)[0m
+2026-09-18T13:39:41.6780138Z [36;1m    sys.exit(1)[0m
+2026-09-18T13:39:41.6780408Z [36;1mprint("%d.%d.%d" % (n // 100 % 10, n // 10 % 10, n % 10))[0m
+2026-09-18T13:39:41.6780698Z [36;1mPY[0m
+2026-09-18T13:39:41.6780864Z [36;1m)[0m
+2026-09-18T13:39:41.6781114Z [36;1mif [ -z "$VER" ]; then echo "::error::版本号解析失败"; exit 1; fi[0m
+2026-09-18T13:39:41.6781440Z [36;1mecho "version=$VER" >> "$GITHUB_OUTPUT"[0m
+2026-09-18T13:39:41.6781710Z [36;1mecho "本次构建版本号: $VER"[0m
+2026-09-18T13:39:41.6798452Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-09-18T13:39:41.6798839Z env:
+2026-09-18T13:39:41.6799120Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:41.6799648Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-09-18T13:39:41.6800106Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:41.6800690Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:41.6801127Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:41.6801426Z   INPUT_VER: 1.1.6
+2026-09-18T13:39:41.6801618Z   RUN_NUMBER: 10
+2026-09-18T13:39:41.6801805Z   PYTHONUTF8: 1
+2026-09-18T13:39:41.6802005Z   PYTHONIOENCODING: utf-8
+2026-09-18T13:39:41.6802235Z ##[endgroup]
+2026-09-18T13:39:42.1874971Z 本次构建版本号: 1.1.6
+2026-09-18T13:39:42.2079021Z ##[group]Run python - "$VER" <<'PY'
+2026-09-18T13:39:42.2079400Z [36;1mpython - "$VER" <<'PY'[0m
+2026-09-18T13:39:42.2080295Z [36;1mimport re, io, sys[0m
+2026-09-18T13:39:42.2080531Z [36;1mver = sys.argv[1][0m
+2026-09-18T13:39:42.2080756Z [36;1mpath = "state.py"[0m
+2026-09-18T13:39:42.2081009Z [36;1ms = io.open(path, encoding="utf-8").read()[0m
+2026-09-18T13:39:42.2081384Z [36;1m# 替换 APP_VERSION 整行：getenv 默认值 + 末尾 or 兜底值都改成本次版本号[0m
+2026-09-18T13:39:42.2081701Z [36;1mnew, n = re.subn([0m
+2026-09-18T13:39:42.2082146Z [36;1m    r'^APP_VERSION\s*=\s*os\.getenv\(\s*["\']FMS_APP_VERSION["\']\s*,\s*["\'][^"\']*["\']\s*\)\.strip\(\)\s*or\s*["\'][^"\']*["\'].*$',[0m
+2026-09-18T13:39:42.2082742Z [36;1m    'APP_VERSION = os.getenv("FMS_APP_VERSION", "%s").strip() or "%s"' % (ver, ver),[0m
+2026-09-18T13:39:42.2083110Z [36;1m    s,[0m
+2026-09-18T13:39:42.2083288Z [36;1m    count=1,[0m
+2026-09-18T13:39:42.2083486Z [36;1m    flags=re.M,[0m
+2026-09-18T13:39:42.2083743Z [36;1m)[0m
+2026-09-18T13:39:42.2083915Z [36;1mif n != 1:[0m
+2026-09-18T13:39:42.2084217Z [36;1m    print("::error::Could not locate APP_VERSION line in state.py")[0m
+2026-09-18T13:39:42.2084555Z [36;1m    sys.exit(1)[0m
+2026-09-18T13:39:42.2084806Z [36;1mio.open(path, "w", encoding="utf-8").write(new)[0m
+2026-09-18T13:39:42.2085133Z [36;1mprint("Stamped APP_VERSION =", ver)[0m
+2026-09-18T13:39:42.2085386Z [36;1mPY[0m
+2026-09-18T13:39:42.2085588Z [36;1mgrep -n "APP_VERSION" state.py[0m
+2026-09-18T13:39:42.2100001Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-09-18T13:39:42.2100381Z env:
+2026-09-18T13:39:42.2100647Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.2101099Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-09-18T13:39:42.2101525Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.2101920Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.2102303Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.2102606Z   VER: 1.1.6
+2026-09-18T13:39:42.2102781Z   PYTHONUTF8: 1
+2026-09-18T13:39:42.2102975Z   PYTHONIOENCODING: utf-8
+2026-09-18T13:39:42.2103187Z ##[endgroup]
+2026-09-18T13:39:42.2905462Z Stamped APP_VERSION = 1.1.6
+2026-09-18T13:39:42.3679524Z 42:APP_VERSION = os.getenv("FMS_APP_VERSION", "1.1.6").strip() or "1.1.6"
+2026-09-18T13:39:42.3889674Z ##[group]Run python -m PyInstaller --noconfirm --clean FMS_UPDATE_MANAGER.spec
+2026-09-18T13:39:42.3890340Z [36;1mpython -m PyInstaller --noconfirm --clean FMS_UPDATE_MANAGER.spec[0m
+2026-09-18T13:39:42.3890916Z [36;1mtest -f "dist/FMS_UPDATE_MANAGER/FMS_UPDATE_MANAGER.exe" || (echo "EXE 未生成" && exit 1)[0m
+2026-09-18T13:39:42.3904846Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-09-18T13:39:42.3905238Z env:
+2026-09-18T13:39:42.3905515Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.3905991Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-09-18T13:39:42.3906470Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.3906874Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.3907276Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.3907650Z   FMS_APP_VERSION: 1.1.6
+2026-09-18T13:39:42.3907878Z ##[endgroup]
+2026-09-18T13:39:42.9178454Z 338 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.7
+2026-09-18T13:39:42.9181686Z 340 INFO: Python: 3.12.10
+2026-09-18T13:39:42.9460213Z 366 INFO: Platform: Windows-2025Server-10.0.26100-SP0
+2026-09-18T13:39:42.9461051Z 366 INFO: Python environment: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-09-18T13:39:42.9560112Z 376 INFO: Removing temporary files and cleaning cache in C:\Users\runneradmin\AppData\Local\pyinstaller
+2026-09-18T13:39:43.0847519Z Traceback (most recent call last):
+2026-09-18T13:39:43.0853759Z   File "<frozen runpy>", line 198, in _run_module_as_main
+2026-09-18T13:39:43.0854606Z   File "<frozen runpy>", line 88, in _run_code
+2026-09-18T13:39:43.0855514Z   File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages\PyInstaller\__main__.py", line 321, in <module>
+2026-09-18T13:39:43.0856221Z     run()
+2026-09-18T13:39:43.0856668Z   File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages\PyInstaller\__main__.py", line 215, in run
+2026-09-18T13:39:43.0857170Z     run_build(pyi_config, spec_file, **vars(args))
+2026-09-18T13:39:43.0857738Z   File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages\PyInstaller\__main__.py", line 70, in run_build
+2026-09-18T13:39:43.0858369Z     PyInstaller.building.build_main.main(pyi_config, spec_file, **kwargs)
+2026-09-18T13:39:43.0859032Z   File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages\PyInstaller\building\build_main.py", line 1275, in main
+2026-09-18T13:39:43.0859656Z     build(specfile, distpath, workpath, clean_build)
+2026-09-18T13:39:43.0860409Z   File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages\PyInstaller\building\build_main.py", line 1213, in build
+2026-09-18T13:39:43.0864808Z     exec(code, spec_namespace)
+2026-09-18T13:39:43.0865421Z   File "FMS_UPDATE_MANAGER.spec", line 19, in <module>
+2026-09-18T13:39:43.0867172Z     import flet_desktop  # noqa: E402
+2026-09-18T13:39:43.0867622Z     ^^^^^^^^^^^^^^^^^^^
+2026-09-18T13:39:43.0867992Z ModuleNotFoundError: No module named 'flet_desktop'
+2026-09-18T13:39:43.1168423Z ##[error]Process completed with exit code 1.
+2026-09-18T13:39:43.1445569Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-18T13:39:43.1447105Z Post job cleanup.
+2026-09-18T13:39:43.3267092Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-18T13:39:43.3541601Z git version 2.55.0.windows.5
+2026-09-18T13:39:43.3604540Z Temporarily overriding HOME='D:\a\_temp\c77c80c0-db51-457e-ae0f-b57ad46740af' before making global git config changes
+2026-09-18T13:39:43.3605352Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-18T13:39:43.3615559Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\FMS-UPDATE-MANAGER\FMS-UPDATE-MANAGER
+2026-09-18T13:39:43.3950695Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-18T13:39:43.4261857Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-18T13:39:43.9890070Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-18T13:39:44.0159309Z http.https://github.com/.extraheader
+2026-09-18T13:39:44.0205211Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2026-09-18T13:39:44.0525585Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-18T13:39:44.5997680Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-18T13:39:44.6316879Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-18T13:39:45.2274977Z Cleaning up orphan processes
+2026-09-18T13:39:45.2315376Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

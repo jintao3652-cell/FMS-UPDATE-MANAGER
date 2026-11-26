@@ -269,6 +269,23 @@ def default_addons() -> list[dict]:
             "navdata_subpath": r"work\FMSData",
         }
     )
+    # Bluebird B757-200 shares the "Bluebird 757/767" DFD v2 navdata package.
+    # The addon can live under the WASM scan tree (MSFS 2024) or the local
+    # packages tree (MSFS 2020), so expose it for both simulators/platforms.
+    for sim in ("MSFS 2020", "MSFS 2024"):
+        for plat in ("Steam", "Xbox/MS Store"):
+            addons.append(
+                {
+                    "name": "Bluebird B757-200",
+                    "description": "Bluebird Simulations Boeing 757-200",
+                    "simulator": sim,
+                    "platform": plat,
+                    "target_path": "",
+                    "package_name": "bluebirdsim-aircraft-757-200",
+                    "navdata_subpath": r"work\NavigationData",
+                }
+            )
+
     for sim, package in (
         ("MSFS 2020", "navigraph-msfs2020-base"),
         ("MSFS 2024", "navigraph-msfs2024-base"),

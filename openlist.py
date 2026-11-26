@@ -154,6 +154,7 @@ OPENLIST_ARCHIVE_NAME_HINTS: dict[str, tuple[str, ...]] = {
     "inibuilds-aircraft-a340": ("inibuilds",),
     "inibuilds-aircraft-a350": ("inibuilds",),
     "inibuilds-aircraft-a380": ("a380",),
+    "bluebirdsim-aircraft-757-200": ("bluebird", "757", "767"),
     "aerosoft-aircraft-a346-pro": ("toliss", "dfdv2", "as346", "a346", "aerosofta346", "aerosoft"),
     "navigraph-msfs2020-base": ("msfs2020",),
     "navigraph-msfs2024-base": ("msfs2024",),
@@ -816,6 +817,9 @@ def select_openlist_archive_for_addon(addon: Addon, cycle_id: str, items: list[d
     elif package == "inibuilds-aircraft-a380":
         # A380 与 A340/A350 共用 iniBuilds 的 DFD v2 数据包（用户确认）
         hard_rules = [("inibuilds", "dfdv2"), ("inibuilds", "dfd")]
+    elif package == "bluebirdsim-aircraft-757-200":
+        # Bluebird 757/767 share one navdata package; accept both names.
+        hard_rules = [("bluebird", "757"), ("bluebird", "767"), ("bluebird",)]
     elif package == "aerosoft-aircraft-a346-pro":
         hard_rules = [
             ("toliss", "dfdv2"),

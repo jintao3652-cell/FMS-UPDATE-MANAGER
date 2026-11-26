@@ -43,6 +43,7 @@ FMS UPDATE MANAGER 是一个面向 Microsoft Flight Simulator 的 AIRAC 数据�
 - CSS 737CL
 - FYCYC C919
 - iFly 737 MAX8
+- Bluebird B757-200（757/767 共用数据包，支持 WASM 与本地 packages 目录）
 
 ## 目录说明
 
